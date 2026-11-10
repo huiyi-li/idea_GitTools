@@ -1,0 +1,46 @@
+.cm-editor.has-code-minimap > .cm-scroller {
+  margin-right: 64px;
+}
+.code-minimap {
+  --minimap-text: var(--fg-secondary, #a1a1aa);
+  --minimap-inserted: #4f9c49;
+  --minimap-deleted: #de6a66;
+  --minimap-modified: #528bca;
+  --minimap-conflict: #db9448;
+  --minimap-resolved: #6b9369;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 64px;
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+  background: var(--mg-editor-bg, var(--bg-editor));
+  border-left: 1px solid var(--border-subtle, #6664);
+  box-sizing: border-box;
+}
+.code-minimap canvas {
+  width: 64px;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.code-minimap-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  background: #80808035;
+  border-top: 1px solid #8887;
+  border-bottom: 1px solid #8887;
+  box-sizing: border-box;
+}
+.code-minimap:hover .code-minimap-viewport {
+  background: #80808055;
+}
+.code-minimap:focus-visible {
+  outline: 1px solid var(--fg-link, #528bca);
+  outline-offset: -1px;
+}

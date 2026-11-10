@@ -6,6 +6,9 @@ use tauri::Emitter;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
+pub(crate) mod history;
+pub(crate) mod merge;
+
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
 const MAX_FILE: usize = 1024 * 1024;
 const MAX_LINES: usize = 20_000;
@@ -16,6 +19,7 @@ pub struct Git {
     pub root: PathBuf,
     pub app: Option<tauri::AppHandle>,
     watcher: Option<crate::watcher::RepositoryWatcher>,
+    merge_session: Option<merge::MergeSession>,
 }
 
 struct Output {
@@ -64,6 +68,7 @@ impl Git {
             root: path,
             app,
             watcher: None,
+            merge_session: None,
         };
         let root = git.text(&["rev-parse", "--show-toplevel"]).await?;
         git.root = Path::new(root.trim())
@@ -74,14 +79,7 @@ impl Git {
 
     pub fn root_string(&self) -> String {
         // Git and the UI use ordinary Windows paths, including for canonical paths.
-        let path = self.root.to_string_lossy();
-        if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
-            format!("//{}", unc.replace('\\', "/"))
-        } else {
-            path.strip_prefix(r"\\?\")
-                .unwrap_or(&path)
-                .replace('\\', "/")
-        }
+        git_path(&self.root)
     }
 
     pub async fn start_watching(&mut self) -> Result<(), String> {
@@ -114,6 +112,15 @@ impl Git {
     }
 
     async fn execute(&self, args: &[&str], input: Option<&[u8]>) -> Result<Output, String> {
+        self.execute_with_env(args, input, &[]).await
+    }
+
+    async fn execute_with_env(
+        &self,
+        args: &[&str],
+        input: Option<&[u8]>,
+        env: &[(&str, &str)],
+    ) -> Result<Output, String> {
         let started = Instant::now();
         let label = format!("git {}", args.join(" "));
         if let Some(app) = &self.app {
@@ -141,6 +148,9 @@ impl Git {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        for (key, value) in env {
+            command.env(key, value);
+        }
         #[cfg(windows)]
         command.creation_flags(0x08000000);
         let mut child = command
@@ -204,12 +214,15 @@ impl Git {
             .map_err(|_| "Git returned non-UTF-8 text.".into())
     }
 
-    pub async fn repository(&self) -> Result<Repository, String> {
+    async fn head(&self) -> Result<Option<String>, String> {
         let head = self
             .execute(&["rev-parse", "--verify", "HEAD"], None)
             .await?;
-        let head =
-            (head.code == 0).then(|| String::from_utf8_lossy(&head.stdout).trim().to_owned());
+        Ok((head.code == 0).then(|| String::from_utf8_lossy(&head.stdout).trim().to_owned()))
+    }
+
+    pub async fn repository(&self) -> Result<Repository, String> {
+        let head = self.head().await?;
         let branch = self
             .execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None)
             .await?;
@@ -415,16 +428,30 @@ impl Git {
         validate_path(&request.path)?;
         let old_path = request.old_path.as_deref().unwrap_or(&request.path);
         validate_path(old_path)?;
-        let (before, after) = if let Some(revision) = request.revision {
-            let details = self.details(&revision).await?;
-            let before = if let Some(parent) = details.commit.parents.first() {
+        let (before, after) = if let Some(before_revision) = request.before_revision {
+            validate_hash(&before_revision)?;
+            let revision = request.revision.as_deref().ok_or("请选择比较的两个提交")?;
+            validate_hash(revision)?;
+            (
+                self.blob(&before_revision, old_path).await?,
+                self.blob(revision, &request.path).await?,
+            )
+        } else if let Some(revision) = request.revision {
+            validate_hash(&revision)?;
+            let ancestry = self
+                .text(&["rev-list", "--parents", "--max-count=1", &revision, "--"])
+                .await?;
+            let mut hashes = ancestry.split_whitespace();
+            validate_hash(hashes.next().ok_or("Select a commit to view its diff.")?)?;
+            let before = if let Some(parent) = hashes.next() {
+                validate_hash(parent)?;
                 self.blob(parent, old_path).await?
             } else {
                 Some(vec![])
             };
             (before, self.blob(&revision, &request.path).await?)
         } else {
-            let before = if let Some(head) = self.repository().await?.head {
+            let before = if let Some(head) = self.head().await? {
                 self.blob(&head, old_path).await?
             } else {
                 Some(vec![])
@@ -579,6 +606,17 @@ fn validate_hash(hash: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Invalid commit ID.".into())
+    }
+}
+
+fn git_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!("//{}", unc.replace('\\', "/"))
+    } else {
+        path.strip_prefix(r"\\?\")
+            .unwrap_or(&path)
+            .replace('\\', "/")
     }
 }
 

@@ -57,6 +57,29 @@ export interface DiffTarget {
   path: string;
   oldPath: string | null;
   revision: string | null;
+  beforeRevision?: string;
+}
+
+export type HistoryAction = 'merge' | 'rebase' | 'cherry-pick' | 'revert';
+
+export interface HistoryRequest {
+  action: HistoryAction;
+  target: string;
+  targetHash: string;
+  expectedHead: string;
+  expectedBranch: string;
+  mergeMode: 'auto' | 'no-ff' | 'ff-only';
+  mainline: number | null;
+}
+
+export interface BranchComparison {
+  base: string;
+  target: string;
+  baseName: string;
+  targetName: string;
+  baseOnly: number;
+  targetOnly: number;
+  changes: Change[];
 }
 
 export interface FileDiff {

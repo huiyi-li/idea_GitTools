@@ -1,6 +1,6 @@
 {
   "name": "ideagittool-desktop",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,12 +10,17 @@
     "tauri": "tauri",
     "desktop": "tauri dev",
     "package": "tauri build",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "postpackage": "node scripts/collect-release.mjs",
+    "test": "npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:merge": "node scripts/test-merge.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/language-data": "^6.5.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.34.1",
+    "@lezer/highlight": "^1.2.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "preact": "^10.24.3"
@@ -23,7 +28,18 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.6.3",
     "vite": "^7.0.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huiyi-li/idea_GitTools.git"
+  },
+  "homepage": "https://github.com/huiyi-li/idea_GitTools#readme",
+  "bugs": {
+    "url": "https://github.com/huiyi-li/idea_GitTools/issues"
   }
 }

@@ -1,0 +1,188 @@
+.merge-manager {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.merge-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  height: 42px;
+  flex: none;
+  font-size: 12px;
+}
+.merge-header strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.merge-header > button:not(.tool-button) {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.merge-layout {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.merge-files {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background: var(--bg);
+}
+.merge-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 0;
+  min-height: 42px;
+}
+.merge-file.selected {
+  background: var(--bg-selection);
+}
+.merge-file-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.merge-file-label > span {
+  font-size: 12px;
+}
+.merge-file small {
+  color: var(--fg-info);
+  font-size: 10px;
+}
+.merge-completed {
+  padding: 7px 10px;
+  color: var(--fg-success);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.merge-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.merge-content > .panel-heading > .mono {
+  flex: 1;
+}
+.merge-content > .panel-heading > .muted {
+  font-size: 11px;
+}
+.merge-editor {
+  flex: 1;
+  min-height: 0;
+}
+.merge-preparing {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--bg-editor);
+}
+.merge-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 7px;
+  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+.merge-toolbar-label {
+  color: var(--fg-info);
+  font-size: 11px;
+  margin-right: 5px;
+  white-space: nowrap;
+}
+.merge-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-info);
+  white-space: nowrap;
+  margin: 0 4px;
+}
+.merge-stat.done {
+  color: var(--fg-success);
+}
+.merge-editor .mg-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+.merge-side-label {
+  color: var(--fg-info);
+  font-size: 11px;
+  flex: none;
+}
+.merge-result-title strong {
+  font-weight: 500;
+}
+.merge-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  min-height: 48px;
+}
+.merge-footer button {
+  font-size: 12px;
+  border-color: var(--border-control);
+  min-height: 28px;
+}
+.merge-footer button.primary {
+  border-color: var(--accent);
+  min-height: 28px;
+}
+.merge-footer .save-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.merge-manager .modal-backdrop {
+  z-index: 30;
+}
+.merge-manager .action-popup {
+  font-size: 12px;
+}
+@media (max-width: 1250px) {
+  .merge-toolbar-label {
+    display: none;
+  }
+}
+@media (max-width: 1050px) {
+  .merge-header {
+    gap: 7px;
+  }
+  .merge-header > .muted {
+    display: none;
+  }
+  .merge-tools .toolbar-separator {
+    margin-inline: 2px;
+  }
+  .merge-tools .mg-text-action {
+    padding-inline: 3px;
+  }
+  .merge-stat {
+    font-size: 10px;
+    margin-inline: 0;
+  }
+}

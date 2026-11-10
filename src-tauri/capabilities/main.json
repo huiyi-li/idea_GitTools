@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Main application window",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "core:window:allow-close", "dialog:allow-open"]
 }

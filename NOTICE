@@ -1,3 +1,17 @@
+IdeaGitTool Desktop
+
+Derived from IdeaGitTool (VS Code extension):
+  https://github.com/PGshen/vs-idea-gittool
+The local source used for extraction was maintained in this fork:
+  https://github.com/ZenghuiJIA/vs-idea-gittool
+Standalone desktop implementation:
+  https://github.com/huiyi-li/idea_GitTools
+
+The upstream package declares Apache-2.0. Its root LICENSE contains JetBrains
+Open-Source Build Terms; that original file is preserved verbatim in
+licenses/UPSTREAM_LICENSE.txt. The standalone project's Apache License 2.0
+text is provided in LICENSE. Existing upstream attributions follow.
+
 IdeaGitTool
 
 This extension re-creates the git UI of Rebased (https://github.com/detachhead/rebased),
@@ -7,3 +21,9 @@ The icons in media/icons are copied from those projects (the extension logo, med
   Copyright 2000-2026 JetBrains s.r.o. and contributors.
   Licensed under the Apache License, Version 2.0.
 UI texts follow GitBundle.properties / VcsBundle.properties of the IntelliJ Platform (Apache 2.0).
+
+The standalone desktop merge editor reuses IdeaGitTool's merge models, editor
+controller, theme and gutter icons. The copied icons are in src/merge/icons;
+their JetBrains attribution and Apache 2.0 notice above also apply to them.
+The standalone workbench also reuses the icons in src/ui/icons under the same
+JetBrains attribution and Apache 2.0 notice.

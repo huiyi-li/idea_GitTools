@@ -1,6 +1,6 @@
 [package]
 name = "ideagittool-desktop"
-version = "0.1.0"
+version = "0.4.0"
 description = "Lightweight standalone IdeaGitTool Git client"
 authors = ["IdeaGitTool contributors"]
 license = "Apache-2.0"
@@ -23,11 +23,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
 notify = "8"
 tokio = { version = "1", features = ["process", "io-util", "time", "sync", "rt-multi-thread", "macros"] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 codegen-units = 1

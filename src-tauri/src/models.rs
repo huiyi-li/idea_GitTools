@@ -88,6 +88,7 @@ pub struct DiffRequest {
     pub path: String,
     pub old_path: Option<String>,
     pub revision: Option<String>,
+    pub before_revision: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

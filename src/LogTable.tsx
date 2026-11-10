@@ -7,9 +7,9 @@ const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: '
 
 function Graph({ row, width }: { row: GraphRow; width: number }) {
   const x = (lane: number) => 12 + lane * 12;
-  const y = (position: number) => position * 15;
+  const y = (position: number) => position * 13;
   return (
-    <svg width={width} height="30" class="commit-graph" aria-hidden="true">
+    <svg width={width} height="26" class="commit-graph" aria-hidden="true">
       {row.edges.map((edge, i) => (
         <path
           key={i}
@@ -19,7 +19,7 @@ function Graph({ row, width }: { row: GraphRow; width: number }) {
           stroke-width="1.6"
         />
       ))}
-      <circle cx={x(row.lane)} cy="15" r="3.8" fill={graphColor(row.color, 0.55, 0.85)} />
+      <circle cx={x(row.lane)} cy="13" r="3.5" fill={graphColor(row.color, 0.55, 0.85)} />
     </svg>
   );
 }
@@ -60,6 +60,7 @@ export function LogTable({
         <span>提交</span>
         <span>作者</span>
         <span>时间</span>
+        <span>Hash</span>
       </div>
       {commits.map((commit, i) => (
         <div
@@ -87,6 +88,7 @@ export function LogTable({
             {commit.author}
           </span>
           <span class="muted">{date.format(commit.time * 1000)}</span>
+          <span class="mono muted commit-short-hash">{commit.hash.slice(0, 8)}</span>
         </div>
       ))}
       {!commits.length && <div class="empty">没有匹配的提交</div>}

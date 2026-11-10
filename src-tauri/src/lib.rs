@@ -2,6 +2,8 @@ mod git;
 mod models;
 mod watcher;
 
+use git::history::{BranchComparison, HistoryRequest};
+use git::merge::{MergeDocument, MergeOverview, SaveMerge};
 use git::Git;
 use models::*;
 use tauri::State;
@@ -151,6 +153,81 @@ async fn apply_stash(root: String, hash: String, state: State<'_, AppState>) -> 
         .await
 }
 
+#[tauri::command]
+async fn compare_branch(
+    root: String,
+    branch: String,
+    state: State<'_, AppState>,
+) -> Result<BranchComparison, String> {
+    active(&*state.0.lock().await, &root)?
+        .compare_branch(&branch)
+        .await
+}
+
+#[tauri::command]
+async fn start_history(
+    root: String,
+    request: HistoryRequest,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .start_history(request)
+        .await
+}
+
+#[tauri::command]
+async fn merge_overview(root: String, state: State<'_, AppState>) -> Result<MergeOverview, String> {
+    active(&*state.0.lock().await, &root)?
+        .merge_overview()
+        .await
+}
+
+#[tauri::command]
+async fn open_merge(
+    root: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<MergeDocument, String> {
+    let mut current = state.0.lock().await;
+    active(&current, &root)?;
+    current
+        .as_mut()
+        .ok_or("请先打开仓库")?
+        .open_merge(path)
+        .await
+}
+
+#[tauri::command]
+async fn save_merge(
+    root: String,
+    request: SaveMerge,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut current = state.0.lock().await;
+    active(&current, &root)?;
+    current
+        .as_mut()
+        .ok_or("请先打开仓库")?
+        .save_merge(request)
+        .await
+}
+
+#[tauri::command]
+async fn merge_operation(
+    root: String,
+    operation_id: String,
+    action: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut current = state.0.lock().await;
+    active(&current, &root)?;
+    current
+        .as_mut()
+        .ok_or("请先打开仓库")?
+        .merge_operation(operation_id, action)
+        .await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -168,7 +245,13 @@ pub fn run() {
             create_branch,
             remote_action,
             save_stash,
-            apply_stash
+            apply_stash,
+            compare_branch,
+            start_history,
+            merge_overview,
+            open_merge,
+            save_merge,
+            merge_operation
         ])
         .run(tauri::generate_context!())
         .expect("Could not start IdeaGitTool");

@@ -3,7 +3,7 @@ use std::fs;
 use std::process::Command as SyncCommand;
 use tempfile::TempDir;
 
-fn run(root: &Path, args: &[&str]) -> String {
+pub(super) fn run(root: &Path, args: &[&str]) -> String {
     let output = SyncCommand::new("git")
         .args(args)
         .current_dir(root)
@@ -18,7 +18,7 @@ fn run(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-fn fixture() -> TempDir {
+pub(super) fn fixture() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     run(dir.path(), &["init", "-b", "main"]);
     run(dir.path(), &["config", "user.name", "Desktop Test"]);
@@ -49,6 +49,7 @@ fn request(path: &str) -> DiffRequest {
         path: path.into(),
         old_path: None,
         revision: None,
+        before_revision: None,
     }
 }
 
@@ -123,6 +124,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             path: change.path.clone(),
             old_path: change.old_path,
             revision: None,
+            before_revision: None,
         })
         .await
         .unwrap();
@@ -136,6 +138,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             path: change.path,
             old_path: change.old_path,
             revision: Some(hash),
+            before_revision: None,
         })
         .await
         .unwrap();
@@ -248,6 +251,37 @@ async fn binary_large_file_and_literal_pathspecs() {
 }
 
 #[tokio::test]
+async fn historical_diff_requires_a_commit_and_handles_the_root_commit() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    fs::write(dir.path().join("file.txt"), "--full-tree\n").unwrap();
+    git.stage(vec!["file.txt".into()], false).await.unwrap();
+    git.commit("initial").await.unwrap();
+    let head = git.repository().await.unwrap().head.unwrap();
+    let mut initial = request("file.txt");
+    initial.revision = Some(head.clone());
+    let diff = git.diff(initial).await.unwrap();
+    assert_eq!(diff.before, "");
+    assert_eq!(diff.after, "--full-tree\n");
+
+    for object in ["HEAD:file.txt", "HEAD^{tree}"] {
+        let hash = run(dir.path(), &["rev-parse", object]);
+        let mut invalid = request("file.txt");
+        invalid.revision = Some(hash.trim().into());
+        assert!(git.diff(invalid).await.is_err());
+    }
+    assert_eq!(
+        git.repository().await.unwrap().head.as_deref(),
+        Some(head.as_str())
+    );
+    assert!(git.status().await.unwrap().changes.is_empty());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("file.txt")).unwrap(),
+        "--full-tree\n"
+    );
+}
+
+#[tokio::test]
 async fn rejected_commit_keeps_index_and_worktree() {
     let dir = fixture();
     let git = open(&dir).await;
@@ -353,6 +387,7 @@ async fn merge_details_compare_to_first_parent() {
             path: "feature.txt".into(),
             old_path: None,
             revision: Some(head),
+            before_revision: None,
         })
         .await
         .unwrap();
