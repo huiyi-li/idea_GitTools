@@ -1,0 +1,693 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+button {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) {
+  background: var(--bg-action-hover);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+button.primary {
+  background: var(--accent);
+  color: white;
+  padding: 8px 16px;
+}
+button.primary:hover:not(:disabled) {
+  background: #4682f3;
+}
+input:not([type='checkbox']),
+textarea {
+  color: var(--fg);
+  background: var(--bg-editor);
+  border: 1px solid var(--border-control);
+  border-radius: 5px;
+  padding: 7px 10px;
+  outline: none;
+}
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+.desktop-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.muted {
+  color: var(--fg-info);
+}
+.selectable {
+  user-select: text;
+}
+.mono {
+  font-family: Consolas, 'Courier New', monospace;
+}
+.spacer {
+  flex: 1;
+}
+.app-header {
+  height: 52px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  border-radius: 7px;
+  background: #3574f0;
+  font-size: 22px;
+}
+.build-label {
+  color: var(--fg-info);
+  font-size: 11px;
+}
+.repo-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.branch-name {
+  color: var(--fg-info);
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.message {
+  display: flex;
+  gap: 10px;
+  padding: 7px 14px;
+  align-items: center;
+  max-height: 100px;
+  overflow: auto;
+  user-select: text;
+  flex: none;
+  white-space: pre-wrap;
+}
+.message span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.error-message {
+  background: var(--bg-banner-error);
+  color: var(--fg-error);
+}
+.notice-message {
+  background: var(--bg-banner-info);
+}
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.sidebar {
+  width: 220px;
+  min-width: 180px;
+  max-width: 320px;
+  resize: horizontal;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 35px;
+  min-height: 35px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 600;
+}
+.panel-heading > button:first-of-type {
+  margin-left: auto;
+}
+.panel-heading button {
+  padding: 2px 6px;
+  font-weight: normal;
+}
+.panel-heading .mono {
+  flex: 1;
+  font-weight: normal;
+}
+.sidebar-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+.branch-line {
+  display: flex;
+  align-items: center;
+}
+.branch-item {
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  padding: 7px 12px;
+}
+.branch-item.active,
+.branch-item.active:hover {
+  background: var(--bg-selection);
+}
+.branch-line .branch-item {
+  flex: 1;
+}
+.branch-symbol {
+  display: inline-block;
+  width: 22px;
+  color: var(--fg-info);
+}
+.current-branch {
+  color: var(--fg-success);
+}
+.current-branch .branch-item {
+  color: inherit;
+}
+.checkout {
+  padding: 2px 7px;
+  margin-right: 4px;
+}
+.sidebar-section {
+  margin-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+}
+.sidebar-hint {
+  color: var(--fg-info);
+  padding: 12px;
+  font-size: 12px;
+}
+.stash-item {
+  padding: 8px 12px;
+}
+.stash-item button {
+  font-size: 11px;
+  padding: 3px 6px;
+  color: var(--fg-link);
+  margin-top: 3px;
+}
+.main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  height: 40px;
+  flex: none;
+}
+.tabs > button {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 0;
+}
+.tabs > button.active {
+  border-bottom: 2px solid var(--accent);
+}
+.badge {
+  background: var(--bg-hover);
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 11px;
+  margin-left: 4px;
+}
+.operation {
+  color: var(--fg-warning);
+  padding-right: 12px;
+}
+.top-content {
+  display: flex;
+  flex: 1;
+  min-height: 180px;
+  overflow: hidden;
+}
+.history-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log-toolbar input {
+  width: 260px;
+  max-width: 70%;
+}
+.log-table {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  background: var(--bg-editor);
+}
+.log-columns,
+.commit-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 110px 125px;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+}
+.log-columns {
+  color: var(--fg-info);
+  font-size: 11px;
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 25px;
+  padding-left: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.commit-row {
+  height: 30px;
+  font-size: 12px;
+  cursor: default;
+}
+.commit-row:hover {
+  background: var(--bg-row-hover);
+}
+.commit-row.selected,
+.commit-row.selected:hover {
+  background: var(--bg-selection);
+}
+.commit-subject {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.commit-graph {
+  flex: none;
+}
+.ref-label {
+  display: inline-block;
+  padding: 0 4px;
+  line-height: 17px;
+  margin-right: 5px;
+  border-radius: 3px;
+  color: var(--ref-local);
+  background: var(--bg-tag);
+  font-size: 10px;
+  max-width: 180px;
+  overflow: hidden;
+  vertical-align: middle;
+  text-overflow: ellipsis;
+}
+.ref-label.remote {
+  color: var(--ref-remote);
+}
+.pagination {
+  display: flex;
+  gap: 12px;
+  padding: 5px 10px;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 11px;
+  border-top: 1px solid var(--border-subtle);
+}
+.details-panel {
+  width: 300px;
+  min-width: 220px;
+  max-width: 40%;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.commit-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 48%;
+  user-select: text;
+}
+.commit-details strong {
+  font-size: 13px;
+  line-height: 20px;
+}
+.commit-details span {
+  overflow-wrap: anywhere;
+}
+.commit-details .mono {
+  font-size: 10px;
+  color: var(--fg-info);
+}
+.commit-details p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+.file-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 45px;
+}
+.file-row {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+}
+.file-row:hover {
+  background: var(--bg-row-hover);
+}
+.file-row.selected {
+  background: var(--bg-selection);
+}
+.file-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  text-align: left;
+  border-radius: 0;
+  padding: 6px 12px;
+  gap: 8px;
+  font-size: 12px;
+}
+.file-status {
+  font-size: 11px;
+  color: var(--status-modified);
+  min-width: 14px;
+}
+.file-status.conflict {
+  color: var(--status-conflict);
+}
+.file-action {
+  margin-right: 6px;
+  padding: 2px 7px;
+  font-size: 17px;
+}
+.changes-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.changes-panel .file-list {
+  flex: 1;
+}
+.conflict-hint {
+  padding: 8px 12px;
+  color: var(--fg-warning);
+  background: var(--bg-banner-warning);
+  font-size: 12px;
+}
+.resolve-stage {
+  color: var(--fg-link);
+}
+.commit-panel {
+  width: 300px;
+  max-width: 40%;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+.commit-panel .panel-heading {
+  margin: 0 -12px;
+}
+.commit-panel label {
+  font-size: 12px;
+}
+.commit-panel textarea {
+  flex: 1;
+  min-height: 70px;
+  resize: none;
+  line-height: 21px;
+}
+.commit-summary,
+.commit-panel small {
+  color: var(--fg-info);
+  font-size: 11px;
+}
+.commit-panel small {
+  line-height: 17px;
+}
+.diff-panel {
+  height: 42%;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-editor);
+}
+.diff-panel .panel-heading {
+  background: var(--bg);
+}
+.diff-editors {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.diff-editors > div {
+  width: 50%;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.diff-editors > div:first-child {
+  border-right: 1px solid var(--border-control);
+}
+.diff-labels {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-subtle);
+  height: 26px;
+  flex: none;
+  padding: 0 12px;
+  color: var(--fg-info);
+  font-size: 11px;
+}
+.diff-labels label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.line-added {
+  background: #4f9c4930;
+}
+.line-removed {
+  background: #de6a6630;
+}
+.empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  color: var(--fg-info);
+  text-align: center;
+  font-size: 12px;
+  line-height: 20px;
+}
+.empty.small {
+  padding: 12px;
+  min-height: 35px;
+}
+.empty.error-text {
+  color: var(--fg-error);
+  user-select: text;
+}
+.statusbar {
+  height: 28px;
+  padding: 0 12px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--fg-info);
+  border-top: 1px solid var(--border);
+}
+.statusbar > span:nth-child(2) {
+  flex: 1;
+}
+.statusbar button {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.statusbar .busy {
+  color: var(--fg-link);
+}
+.console {
+  height: 175px;
+  min-height: 100px;
+  flex: none;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.console pre {
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  font:
+    11px/17px Consolas,
+    monospace;
+  flex: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-editor);
+}
+.welcome {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 65px 20px 30px;
+}
+.welcome-mark {
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: white;
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  font-size: 55px;
+}
+.welcome h1 {
+  font-size: 28px;
+  line-height: 34px;
+  margin: 18px 0 8px;
+}
+.welcome p {
+  color: var(--fg-info);
+  margin-bottom: 24px;
+}
+.welcome small {
+  color: var(--fg-info);
+  margin-top: 24px;
+}
+.recent {
+  width: 500px;
+  max-width: 80%;
+  margin-top: 28px;
+}
+.recent h2 {
+  color: var(--fg-info);
+  font-size: 12px;
+  font-weight: 400;
+}
+.recent button {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #0008;
+  display: grid;
+  place-items: center;
+}
+.modal {
+  width: 430px;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-popup);
+  border-radius: 9px;
+  padding: 22px;
+  box-shadow: var(--shadow);
+}
+.modal h2 {
+  margin: 0 0 22px;
+  font-size: 16px;
+}
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal p {
+  line-height: 20px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+@media (max-width: 1100px) {
+  .sidebar {
+    width: 180px;
+  }
+  .details-panel,
+  .commit-panel {
+    width: 250px;
+  }
+  .log-columns,
+  .commit-row {
+    grid-template-columns: minmax(120px, 1fr) 90px 112px;
+  }
+  .build-label {
+    display: none;
+  }
+}
