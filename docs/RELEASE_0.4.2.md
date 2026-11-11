@@ -12,3 +12,11 @@
 首次注册步骤见应用的“首次配置 OAuth 应用”与 [网页登录配置](BROWSER_LOGIN.md)。由于尚未注册本应用的 OAuth Client ID，本次使用本地模拟授权服务器验证协议；真实账户的网页登录由用户注册后验证。
 
 版本从 0.4.1 更新为 0.4.2。`release/` 同步 EXE、NSIS 安装包、便携 ZIP 和 SHA-256 清单。
+
+## 发布验证
+
+- 100 项 Rust 测试和 83 项界面测试通过；TypeScript 类型检查及 Vite 生产构建通过。
+- Tauri Windows release 构建与 NSIS 打包成功，EXE 文件版本为 `0.4.2.0`。
+- release 中的 EXE、安装包与构建输出逐字节一致。便携 ZIP 通过独立 Python zipfile CRC 校验，ZIP 内 EXE 与独立 EXE 一致。
+- 三份产物的大小与 SHA-256 均符合 `release/release-manifest.json`。旧版便携 ZIP 保留在 `release/archive/`。
+- 发布源码提交：`3dbe4ea`。本次没有升级主版本或次版本。
