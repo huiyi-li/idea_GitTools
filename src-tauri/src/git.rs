@@ -122,6 +122,16 @@ impl Git {
         input: Option<&[u8]>,
         env: &[(&str, &str)],
     ) -> Result<Output, String> {
+        self.execute_with_timeout(args, input, env, Duration::from_secs(120)).await
+    }
+
+    async fn execute_with_timeout(
+        &self,
+        args: &[&str],
+        input: Option<&[u8]>,
+        env: &[(&str, &str)],
+        timeout: Duration,
+    ) -> Result<Output, String> {
         let started = Instant::now();
         let label = format!("git {}", args.join(" "));
         if let Some(app) = &self.app {
@@ -179,7 +189,7 @@ impl Git {
                 stderr,
             })
         };
-        let output = match tokio::time::timeout(Duration::from_secs(120), task).await {
+        let output = match tokio::time::timeout(timeout, task).await {
             Ok(result) => result,
             Err(_) => Err(
                 "Git timed out after 120 seconds. Check the repository or network, then refresh."
@@ -332,6 +342,8 @@ impl Git {
             "log",
             "--topo-order",
             "--decorate=full",
+            "--decorate-refs-exclude=refs/ideagittool/*",
+            "--decorate-refs-exclude=refs/stash",
             "-z",
             &format,
             &skip,
@@ -342,7 +354,7 @@ impl Git {
             args.extend(["--fixed-strings", "--regexp-ignore-case", &grep]);
         }
         if query.branch.is_empty() {
-            args.extend(["--all", "HEAD"]);
+            args.extend(["--branches", "--remotes", "--tags", "HEAD"]);
         } else {
             self.bytes(&[
                 "rev-parse",

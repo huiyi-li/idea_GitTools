@@ -206,6 +206,23 @@ async fn checkout_backup_restores_index_layout_and_untracked_files() {
     let record = result.record.unwrap();
     assert_eq!(record.phase, "completed");
     assert!(record.stash_sha.is_some());
+    let page = git
+        .log(LogQuery {
+            offset: 0,
+            search: String::new(),
+            branch: String::new(),
+        })
+        .await
+        .unwrap();
+    assert!(page
+        .commits
+        .iter()
+        .all(|c| !c.subject.contains("IdeaGitTool operation")));
+    assert!(page
+        .commits
+        .iter()
+        .flat_map(|c| &c.refs)
+        .all(|r| !r.contains("refs/ideagittool/")));
     assert_eq!(run(dir.path(), &["show", ":shared.txt"]), "staged\n");
     assert_eq!(
         fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
@@ -518,6 +535,16 @@ async fn reflog_and_recovery_branch_find_commits_after_reset() {
         .await
         .unwrap();
     assert!(git.reflog().await.unwrap().iter().any(|e| e.hash == old));
+    let page = git
+        .log(LogQuery {
+            offset: 0,
+            search: String::new(),
+            branch: String::new(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.commits.len(), 1);
+    assert_eq!(page.commits[0].hash, base);
     git.create_recovery_branch("recovery/original", &old)
         .await
         .unwrap();
@@ -526,4 +553,24 @@ async fn reflog_and_recovery_branch_find_commits_after_reset() {
         old
     );
     assert_eq!(git.head().await.unwrap().unwrap(), base);
+}
+
+#[tokio::test]
+async fn large_local_file_preview_detects_content_changes_without_reading_diff_output() {
+    let (dir, git, base, _) = setup().await;
+    let data = vec![b'x'; 9 * 1024 * 1024];
+    fs::write(dir.path().join("shared.txt"), &data).unwrap();
+    let preview = git
+        .preview_navigation(&base, NavigationAction::Reset)
+        .await
+        .unwrap();
+    let mut changed = data;
+    let middle = changed.len() / 2;
+    changed[middle] = b'y';
+    fs::write(dir.path().join("shared.txt"), changed).unwrap();
+    assert!(git
+        .execute_navigation(request(preview, ResetMode::Hard, LocalStrategy::Normal))
+        .await
+        .unwrap_err()
+        .contains("重新预览"));
 }

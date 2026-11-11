@@ -171,7 +171,69 @@ fn failure(error: &str) -> (String, Vec<String>) {
     (kind.into(), files)
 }
 
+fn hash_path(hash: &mut Sha256, path: &Path) -> Result<(), String> {
+    use std::io::Read;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            hash.update(b"missing\0");
+            return Ok(());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    if metadata.file_type().is_symlink() {
+        hash.update(b"symlink\0");
+        hash.update(
+            fs::read_link(path)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .as_bytes(),
+        );
+    } else if metadata.is_dir() {
+        hash.update(b"directory\0");
+        let mut entries = fs::read_dir(path)
+            .map_err(|e| e.to_string())?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        entries.sort();
+        for entry in entries {
+            hash.update(
+                entry
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .as_bytes(),
+            );
+            hash.update([0]);
+            hash_path(hash, &entry)?;
+        }
+    } else {
+        hash.update(b"file\0");
+        hash.update(metadata.len().to_le_bytes());
+        let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut buffer = [0; 65536];
+        loop {
+            let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+            if count == 0 {
+                break;
+            }
+            hash.update(&buffer[..count]);
+        }
+    }
+    Ok(())
+}
+
 impl Git {
+    async fn navigation_command(
+        &self,
+        args: &[&str],
+        input: Option<&[u8]>,
+    ) -> Result<Output, String> {
+        self.execute_with_timeout(args, input, &[], Duration::from_secs(1800))
+            .await
+    }
+
     async fn resolve_commit(&self, target: &str) -> Result<String, String> {
         if target.is_empty()
             || target.starts_with('-')
@@ -206,20 +268,11 @@ impl Git {
 
     async fn workspace_fingerprint(&self, target: &str) -> Result<String, String> {
         let mut hash = Sha256::new();
-        for args in [
-            vec!["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            vec!["diff", "--no-ext-diff", "--no-textconv", "--binary", "--"],
-            vec![
-                "diff",
-                "--cached",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--binary",
-                "--",
-            ],
-            vec!["ls-files", "--stage", "-z"],
-        ] {
-            let data = self.bytes(&args).await?;
+        let status = self
+            .bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+            .await?;
+        let changed = parse_status(&status)?;
+        for data in [status, self.bytes(&["ls-files", "--stage", "-z"]).await?] {
             hash.update((data.len() as u64).to_le_bytes());
             hash.update(data);
         }
@@ -230,24 +283,18 @@ impl Git {
         )?
         .into_iter()
         .collect();
+        for change in changed {
+            files.insert(change.path);
+            if let Some(old) = change.old_path {
+                files.insert(old);
+            }
+        }
         files.extend(self.threatened_untracked(target).await?);
         for file in files {
             validate_path(&file)?;
             hash.update(file.as_bytes());
             hash.update([0]);
-            let path = self.root.join(&file);
-            let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-            let data = if metadata.file_type().is_symlink() {
-                fs::read_link(&path)
-                    .map_err(|e| e.to_string())?
-                    .to_string_lossy()
-                    .as_bytes()
-                    .to_vec()
-            } else {
-                fs::read(&path).map_err(|e| e.to_string())?
-            };
-            hash.update((data.len() as u64).to_le_bytes());
-            hash.update(data);
+            hash_path(&mut hash, &self.root.join(&file))?;
         }
         Ok(format!("{:x}", hash.finalize()))
     }
@@ -462,7 +509,7 @@ impl Git {
             args.extend(["--pathspec-from-file=-", "--pathspec-file-nul"]);
             input = Some(pathspec.as_slice());
         }
-        let result = self.execute(&args, input).await?;
+        let result = self.navigation_command(&args, input).await?;
         let saved = self
             .status()
             .await?
@@ -502,7 +549,11 @@ impl Git {
         let stash = record.stash_sha.clone().ok_or("没有关联的本地修改备份")?;
         record.phase = "restoring".into();
         self.save_record(record).await?;
-        match self.bytes(&["stash", "apply", "--index", &stash]).await {
+        match self
+            .navigation_command(&["stash", "apply", "--index", &stash], None)
+            .await
+            .and_then(Output::checked)
+        {
             Ok(_) => {
                 record.phase = "completed".into();
                 record.error = None;
@@ -684,7 +735,7 @@ impl Git {
         };
         // Disable implicit autostash supplied by user configuration.
         args.splice(0..0, ["-c", "reset.quiet=false"]);
-        let output = match self.execute(&args, None).await {
+        let output = match self.navigation_command(&args, None).await {
             Ok(o) => o,
             Err(e) => {
                 record.phase = "interrupted".into();
