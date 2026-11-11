@@ -7,6 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 pub(crate) mod history;
+pub(crate) mod navigation;
 pub(crate) mod merge;
 
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;

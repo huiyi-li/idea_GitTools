@@ -101,6 +101,7 @@ export function RepositorySidebar({
                           <button disabled={item.current} onClick={() => onCheckout(item.full)}>
                             签出 {item.name}
                           </button>
+                          {item.remote && <button onClick={() => onCheckout(item.full)}>签出并创建本地跟踪分支…</button>}
                           <button
                             disabled={!status.repository.head}
                             onClick={() => onAction(item, 'compare')}

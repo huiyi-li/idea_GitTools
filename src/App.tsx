@@ -9,6 +9,7 @@ import {
   staged,
   unstaged,
   type Change,
+  type Commit,
   type Branch,
   type HistoryAction,
   type Details,
@@ -19,9 +20,13 @@ import {
 import { DiffView } from './DiffView';
 import { LogTable } from './LogTable';
 import { RepositorySidebar } from './RepositorySidebar';
-import { ActionMenu, FileIcon, Icon, Split, ToolButton } from './ui/controls';
+import { ActionMenu, FileIcon, Icon, Modal, Split, ToolButton } from './ui/controls';
 import { HistoryDialog, historyLabels, type OperationPreview } from './HistoryDialog';
 import { CompareView } from './CompareView';
+import { NavigationDialog } from './navigation/NavigationDialog';
+import { RecoveryDialog } from './navigation/RecoveryDialog';
+import type { NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, OperationRecord, RecoveryOverview } from './navigation/types';
+import './navigation/style.css';
 
 const EMPTY_PAGE: LogPage = { commits: [], hasMore: false };
 const MergeManager = lazy(() => import('./merge/MergeManager'));
@@ -108,6 +113,15 @@ export function App() {
   const [message, setMessage] = useState('');
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [operationDialog, setOperationDialog] = useState<OperationPreview | null>(null);
+  const [navigation, setNavigation] = useState<{ preview: NavigationPreview; creating: boolean } | null>(null);
+  const [navigationResult, setNavigationResult] = useState<NavigationResult | null>(null);
+  const [navigationError, setNavigationError] = useState('');
+  const [revisionInput, setRevisionInput] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryOverview | null>(null);
+  const [recoveryError, setRecoveryError] = useState('');
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [liveOperation, setLiveOperation] = useState<OperationRecord | null>(null);
+  const [commitContext, setCommitContext] = useState<{ commit: Commit; x: number; y: number } | null>(null);
   const [comparisonBranch, setComparisonBranch] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
   const [mergePath, setMergePath] = useState<string | null>(null);
@@ -135,6 +149,33 @@ export function App() {
       void subscription.then((unlisten) => unlisten()).catch(() => {});
     };
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const subscription = listen<OperationRecord>('git-operation', (event) => {
+      if (!disposed) setLiveOperation(event.payload);
+    });
+    void subscription.catch(() => {});
+    return () => { disposed = true; void subscription.then((stop) => stop()).catch(() => {}); };
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    if (!root) return;
+    void call<RecoveryOverview>('recovery_overview', { root }).then((value) => {
+      if (current && activeRoot.current === root) { setRecovery(value); setLiveOperation(null); setRecoveryError(''); }
+    }).catch((e) => { if (current && activeRoot.current === root) setRecoveryError(String(e)); });
+    return () => { current = false; };
+  }, [root, version]);
+
+  useEffect(() => {
+    if (!commitContext) return;
+    const close = (e: Event) => { if (!(e.target as Element)?.closest('.commit-context-menu')) setCommitContext(null); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setCommitContext(null); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', key); };
+  }, [commitContext]);
 
   async function perform(label: string, job: () => Promise<void>) {
     if (gate.current) return false;
@@ -174,6 +215,18 @@ export function App() {
       setBranch('');
       setSearch('');
       setSearchInput('');
+      setDialog(null);
+      setOperationDialog(null);
+      setNavigation(null);
+      setNavigationResult(null);
+      setRevisionInput(null);
+      setRecovery(null);
+      setRecoveryError('');
+      setShowRecovery(false);
+      setLiveOperation(null);
+      setCommitContext(null);
+      setComparisonBranch(null);
+      setMergePath(null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
@@ -258,6 +311,35 @@ export function App() {
   function branchAction(item: Branch, action: 'compare' | 'merge' | 'rebase') {
     if (action === 'compare') setComparisonBranch(item.full);
     else previewHistory(action, { target: item.full, hash: item.hash, label: item.name });
+  }
+
+  async function previewNavigation(target: string, action: NavigationAction = 'checkout', creating = false) {
+    const path = activeRoot.current;
+    if (!path) return;
+    await perform('预览 Git 操作', async () => {
+      const preview = await call<NavigationPreview>('preview_navigation', { root: path, target, action });
+      if (activeRoot.current !== path) return;
+      setNavigationResult(null);
+      setNavigationError('');
+      setNavigation({ preview, creating });
+      setRevisionInput(null);
+      setShowRecovery(false);
+      setCommitContext(null);
+    });
+  }
+
+  async function runNavigation(request: NavigationRequest) {
+    const path = activeRoot.current;
+    await perform(request.preview.action === 'reset' ? 'Reset' : '签出', async () => {
+      setNavigationError('');
+      try {
+        const result = await call<NavigationResult>('execute_navigation', { root: path, request });
+        setNavigationResult(result);
+        if (result.completed) { setNavigation(null); setNotice(result.message); }
+        else if (result.kind === 'restore') { setNavigation(null); setShowRecovery(true); setError(result.message); }
+      } catch (e) { setNavigationError(String(e)); }
+      finally { await refresh(path).catch((e) => setNavigationError(String(e))); }
+    });
   }
 
   useEffect(() => {
@@ -370,7 +452,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (mergePath !== null || operationDialog || comparisonBranch !== null) return;
+      if (mergePath !== null || operationDialog || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null) return;
       if (event.key === 'F5') {
         event.preventDefault();
         if (root) void perform('刷新', () => refresh());
@@ -391,7 +473,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, comparisonBranch]);
+  }, [root, view, message, mergePath, operationDialog, navigation, showRecovery, revisionInput, comparisonBranch]);
 
   function changeView(next: View) {
     setView(next);
@@ -434,6 +516,8 @@ export function App() {
           </span>
         )}
         <div class="header-actions">
+          <ToolButton icon="vcs/update" label="签出标签或提交 SHA" disabled={!root || !!busy} onClick={() => setRevisionInput('')} />
+          <ToolButton icon="toolwindows/vcs" label="操作恢复与 Reflog" disabled={!root || !!busy} onClick={() => setShowRecovery(true)}><span>Reflog</span></ToolButton>
           {(['fetch', 'pull', 'push'] as const).map((action) => (
             <ToolButton
               icon={action === 'fetch' ? 'vcs/fetch' : action === 'pull' ? 'vcs/update' : 'vcs/push'}
@@ -535,6 +619,11 @@ export function App() {
               </button>
             )}
           </nav>
+          {(liveOperation || recovery?.operation !== 'none' && recovery?.operation || recovery?.records.some((r) => !['completed', 'failed-restored'].includes(r.phase) && (r.stashSha || r.phase === 'interrupted'))) && <div class="navigation-operation-bar" role="status">
+            <span>{liveOperation ? `${liveOperation.action} · ${liveOperation.phase}` : recovery?.operation !== 'none' ? `${recovery?.operation} · ${recovery?.progress ?? ''} · ${recovery?.reason}` : '本地修改备份或中断操作可恢复'}</span>
+            {recovery?.current && <span class="mono">{recovery.current.slice(0, 8)}</span>}
+            <span class="spacer" /><button disabled={!!busy} onClick={() => setShowRecovery(true)}>查看操作恢复</button>
+          </div>}
           <div class="workspace">
             {view === 'log' ? (
               <Split key="log" storageKey="branches" initial={228} min={170} label="调整分支栏宽度">
@@ -547,7 +636,7 @@ export function App() {
                     setBranch(value);
                     setOffset(0);
                   }}
-                  onCheckout={(value) => void mutate('checkout_branch', { branch: value }, '切换分支')}
+                  onCheckout={(value) => void previewNavigation(value)}
                   onCreate={() => setDialog({ kind: 'branch', value: '' })}
                   onFetch={() => void mutate('remote_action', { action: 'fetch' }, 'Fetch')}
                   onStash={() => setDialog({ kind: 'stash', value: 'Work in progress' })}
@@ -600,6 +689,7 @@ export function App() {
                           commits={page.commits}
                           selected={selected}
                           onSelect={(commit) => setSelected(commit.hash)}
+                          onContextMenu={(commit, x, y) => { setSelected(commit.hash); setCommitContext({ commit, x, y }); }}
                         />
                       )}
                       <div class="pagination">
@@ -635,6 +725,10 @@ export function App() {
                       <span class="tree-hint">{details?.changes.length ?? 0}</span>
                       <span class="spacer" />
                       <ActionMenu label="提交操作" text="操作" disabled={!selectedCommit || !!busy}>
+                        <button disabled={status.repository.operation !== 'none'} onClick={() => selectedCommit && void previewNavigation(selectedCommit.hash)}>签出此提交…</button>
+                        <button disabled={status.repository.operation !== 'none'} onClick={() => selectedCommit && void previewNavigation(selectedCommit.hash, 'checkout', true)}>从此提交创建分支…</button>
+                        <button disabled={!status.repository.branch || status.repository.operation !== 'none'} onClick={() => selectedCommit && void previewNavigation(selectedCommit.hash, 'reset')}>重置当前分支到此提交…</button>
+                        <hr />
                         <button
                           disabled={historyDisabled}
                           title={status.changes.length ? '先提交或保存到 Stash' : ''}
@@ -866,6 +960,27 @@ export function App() {
           }}
         />
       )}
+      {commitContext && <div class="action-popup commit-context-menu" role="menu" style={{ left: Math.max(8, Math.min(commitContext.x, window.innerWidth - 290)), top: Math.max(8, Math.min(commitContext.y, window.innerHeight - 150)) }}>
+        <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
+        <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
+        <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>
+      </div>}
+      {navigation && <NavigationDialog key={`${navigation.preview.target}-${navigation.creating}`} preview={navigation.preview} creating={navigation.creating} busy={!!busy} result={navigationResult} error={navigationError}
+        onClose={() => setNavigation(null)} onRun={(request) => void runNavigation(request)}
+        onRetarget={(target) => void previewNavigation(target, navigation.preview.action)}
+        onOpen={(path) => void openPath(path)} />}
+      {revisionInput !== null && <Modal title="签出标签或提交 SHA" busy={!!busy} onClose={() => setRevisionInput(null)}>
+        <form onSubmit={(e) => { e.preventDefault(); void previewNavigation(revisionInput.trim()); }}>
+          <h2>签出标签或提交 SHA</h2><label>分支、标签或提交 SHA<input aria-label="签出目标" value={revisionInput} disabled={!!busy} required onInput={(e) => setRevisionInput(e.currentTarget.value)} /></label>
+          {error && <p class="error-text">{error}</p>}<div class="modal-actions"><button type="button" disabled={!!busy} onClick={() => setRevisionInput(null)}>取消</button><button class="primary" disabled={!!busy || !revisionInput.trim()}>预览签出</button></div>
+        </form>
+      </Modal>}
+      {showRecovery && <RecoveryDialog root={root} overview={recovery} busy={!!busy} error={error || recoveryError} onClose={() => setShowRecovery(false)}
+        onRestore={(id) => void mutate('recover_navigation', { id, action: 'restore' }, '恢复本地修改', true)}
+        onResolve={(id) => void mutate('recover_navigation', { id, action: 'finish' }, '确认操作恢复')}
+        onConflicts={() => { setShowRecovery(false); setMergePath(''); }}
+        onBranch={(hash, name) => mutate('create_recovery_branch', { hash, name }, '创建恢复分支')}
+        onCheckout={(hash) => void previewNavigation(hash)} />}
       {comparisonBranch !== null && (
         <CompareView root={root} branch={comparisonBranch} onClose={() => setComparisonBranch(null)} />
       )}

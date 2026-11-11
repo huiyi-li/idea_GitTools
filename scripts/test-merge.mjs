@@ -14,12 +14,13 @@ try {
     'analysis.test',
     'diff-ui.test',
     'minimap.test',
+    'navigation-ui.test',
   ];
   await build({
     entryPoints: [
       ...tests.map(
         (name) =>
-          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test'].includes(name) ? 'tsx' : 'ts'}`,
+          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test', 'navigation-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
       ),
       'test/analysis-worker.ts',
     ],

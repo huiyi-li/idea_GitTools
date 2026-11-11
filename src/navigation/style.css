@@ -1,0 +1,19 @@
+.navigation-dialog { max-height: 88vh; overflow-y: auto; width: 620px; }
+.navigation-dialog details { margin: 12px 0; }
+.navigation-files { max-height: 180px; overflow: auto; padding-left: 24px; overflow-wrap: anywhere; }
+.navigation-files li { margin: 4px 0; }
+.navigation-target, .recovery-record p { overflow-wrap: anywhere; }
+.navigation-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; margin: 12px 0; }
+.navigation-check input { width: auto; }
+.navigation-warning { border: 1px solid #c88a35; border-radius: 4px; padding: 12px; margin: 12px 0; }
+.navigation-danger { background: #933c39; color: #fff; border-color: #bd5652; }
+.navigation-error { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow-y: auto; }
+.recovery-dialog { width: 760px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; }
+.recovery-scroll { overflow: auto; min-height: 80px; }
+.recovery-record { padding: 12px; margin-bottom: 10px; border: 1px solid var(--border); }
+.recovery-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.recovery-create { padding-top: 12px; }
+.reflog-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.reflog-entry > span:nth-child(2) { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+.navigation-operation-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.commit-context-menu { position: fixed; z-index: 1200; min-width: 240px; }

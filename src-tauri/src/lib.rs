@@ -3,6 +3,7 @@ mod models;
 mod watcher;
 
 use git::history::{BranchComparison, HistoryRequest};
+use git::navigation::{NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, RecoveryOverview, ReflogEntry};
 use git::merge::{MergeDocument, MergeOverview, SaveMerge};
 use git::Git;
 use models::*;
@@ -228,6 +229,36 @@ async fn merge_operation(
         .await
 }
 
+#[tauri::command]
+async fn preview_navigation(root: String, target: String, action: NavigationAction, state: State<'_, AppState>) -> Result<NavigationPreview, String> {
+    active(&*state.0.lock().await, &root)?.preview_navigation(&target, action).await
+}
+
+#[tauri::command]
+async fn execute_navigation(root: String, request: NavigationRequest, state: State<'_, AppState>) -> Result<NavigationResult, String> {
+    active(&*state.0.lock().await, &root)?.execute_navigation(request).await
+}
+
+#[tauri::command]
+async fn recovery_overview(root: String, state: State<'_, AppState>) -> Result<RecoveryOverview, String> {
+    active(&*state.0.lock().await, &root)?.recovery_overview().await
+}
+
+#[tauri::command]
+async fn recover_navigation(root: String, id: String, action: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.recover_navigation(&id, &action).await
+}
+
+#[tauri::command]
+async fn read_reflog(root: String, state: State<'_, AppState>) -> Result<Vec<ReflogEntry>, String> {
+    active(&*state.0.lock().await, &root)?.reflog().await
+}
+
+#[tauri::command]
+async fn create_recovery_branch(root: String, name: String, hash: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.create_recovery_branch(&name, &hash).await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -248,6 +279,12 @@ pub fn run() {
             apply_stash,
             compare_branch,
             start_history,
+            preview_navigation,
+            execute_navigation,
+            recovery_overview,
+            recover_navigation,
+            read_reflog,
+            create_recovery_branch,
             merge_overview,
             open_merge,
             save_merge,

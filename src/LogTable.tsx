@@ -28,10 +28,12 @@ export function LogTable({
   commits,
   selected,
   onSelect,
+  onContextMenu,
 }: {
   commits: Commit[];
   selected: string | null;
   onSelect: (commit: Commit) => void;
+  onContextMenu?: (commit: Commit, x: number, y: number) => void;
 }) {
   const rows = useMemo(() => {
     const graph = new GraphLayout();
@@ -69,6 +71,7 @@ export function LogTable({
           aria-selected={selected === commit.hash}
           class={`commit-row ${selected === commit.hash ? 'selected' : ''}`}
           onClick={() => onSelect(commit)}
+          onContextMenu={(event) => { if (onContextMenu) { event.preventDefault(); onContextMenu(commit, event.clientX, event.clientY); } }}
         >
           <div class="commit-subject">
             <Graph row={rows[i]} width={width} />
