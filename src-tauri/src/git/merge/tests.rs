@@ -37,6 +37,93 @@ fn result(id: &str, text: &str, finish: bool) -> SaveMerge {
 }
 
 #[tokio::test]
+async fn large_merge_results_save_restore_drafts_and_finish_without_truncation() {
+    let (dir, mut git) = conflict().await;
+    let context = "context line\n".repeat(99_990);
+    let mut index = Vec::new();
+    for (stage, middle) in [(1, "base"), (2, "main"), (3, "feature")] {
+        let text = format!("{context}{middle}\nend\n");
+        let hash = git
+            .execute(&["hash-object", "-w", "--stdin"], Some(text.as_bytes()))
+            .await
+            .unwrap()
+            .checked()
+            .unwrap();
+        index.extend_from_slice(
+            format!(
+                "100644 {} {stage}\tconflict.txt\0",
+                String::from_utf8(hash).unwrap().trim()
+            )
+            .as_bytes(),
+        );
+    }
+    git.execute(&["update-index", "-z", "--index-info"], Some(&index))
+        .await
+        .unwrap()
+        .checked()
+        .unwrap();
+    fs::write(
+        dir.path().join("conflict.txt"),
+        format!("{context}<<<<<<< HEAD\nmain\n=======\nfeature\n>>>>>>> feature\nend\n"),
+    )
+    .unwrap();
+    let blocked = git.open_merge("conflict.txt".into()).await.unwrap();
+    assert!(!blocked.editable);
+    assert!(blocked.can_load);
+    assert!(git
+        .save_merge(result(&blocked.id, "replacement", false))
+        .await
+        .is_err());
+    let loaded = git
+        .open_merge_with_options("conflict.txt".into(), true)
+        .await
+        .unwrap();
+    assert!(loaded.editable && loaded.large);
+    let resolved = format!("{context}resolved\nend\n");
+    git.save_merge(result(&loaded.id, &resolved, false))
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("conflict.txt")).unwrap(),
+        resolved
+    );
+    drop(git);
+    let mut git = Git::open(dir.path().to_str().unwrap(), None).await.unwrap();
+    let reopened = git
+        .open_merge_with_options("conflict.txt".into(), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.progress.as_ref().unwrap().lines.join("\n"),
+        resolved
+    );
+    let original = fs::read(dir.path().join("conflict.txt")).unwrap();
+    assert!(git
+        .save_merge(result(&reopened.id, &"x".repeat(MAX_LARGE_FILE + 1), true))
+        .await
+        .is_err());
+    assert_eq!(fs::read(dir.path().join("conflict.txt")).unwrap(), original);
+    git.save_merge(result(&reopened.id, &resolved, true))
+        .await
+        .unwrap();
+    assert!(git.merge_overview().await.unwrap().files.is_empty());
+    assert_eq!(run(dir.path(), &["show", ":conflict.txt"]), resolved);
+}
+
+#[test]
+fn merge_result_validation_enforces_large_line_and_byte_budgets() {
+    let progress = |lines: Vec<String>| Progress {
+        lines,
+        states: vec![],
+        content_modified: true,
+    };
+    assert!(validate_progress(&progress(vec![String::new(); MAX_LARGE_LINES]), true).is_ok());
+    assert!(validate_progress(&progress(vec![String::new(); MAX_LARGE_LINES + 1]), true).is_err());
+    assert!(validate_progress(&progress(vec!["x".repeat(MAX_FILE + 1)]), false).is_err());
+    assert!(validate_progress(&progress(vec!["x".repeat(MAX_FILE + 1)]), true).is_ok());
+}
+
+#[tokio::test]
 async fn draft_survives_restart_and_finish_preserves_other_staged_files() {
     let (dir, mut git) = conflict().await;
     fs::write(dir.path().join("other.txt"), "staged other\n").unwrap();

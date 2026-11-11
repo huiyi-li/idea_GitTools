@@ -9,6 +9,8 @@ export interface PreparedDiff {
   before: string;
   after: string;
   changes: ReturnType<typeof buildChanges>;
+  simplified?: boolean;
+  large?: boolean;
 }
 
 export interface PreparedMerge {

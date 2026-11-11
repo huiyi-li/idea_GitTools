@@ -98,6 +98,7 @@ export class MergeController {
   private hosts!: Record<Pane, HTMLElement>;
   private dividers!: [SVGSVGElement, SVGSVGElement];
   private resizeObserver: ResizeObserver | undefined;
+  private decorationFrame: number | undefined;
   /** Ctrl (Cmd) is held: gutter operations resolve the whole conflict (ModifierProvider). */
   ctrlPressed = false;
   readonly crlf: boolean;
@@ -165,6 +166,12 @@ export class MergeController {
         : EditorState.readOnly.of(!editable),
       EditorView.updateListener.of((u) => {
         if (u.geometryChanged || u.viewportChanged) this.schedule();
+        if (this.init.large && u.viewportChanged && this.decorationFrame === undefined) {
+          this.decorationFrame = requestAnimationFrame(() => {
+            this.decorationFrame = undefined;
+            if (!this.disposed) this.refresh();
+          });
+        }
       }),
       keymap.of(this.mergeKeymap(pane)),
     ];
@@ -260,6 +267,7 @@ export class MergeController {
   };
 
   private async loadLanguage() {
+    if (this.init.large) return;
     const desc = LanguageDescription.matchFilename(languages, this.init.fileName);
     if (!desc) return;
     try {
@@ -285,6 +293,7 @@ export class MergeController {
   }
 
   setMinimap(enabled: boolean) {
+    enabled = enabled && !this.init.large;
     this.minimapEnabled = enabled;
     for (const pane of ['left', 'result', 'right'] as Pane[]) {
       this.views[pane].dispatch({ effects: this.minimapMode.reconfigure(enabled ? this.minimap(pane) : []) });
@@ -300,6 +309,7 @@ export class MergeController {
 
   destroy() {
     this.disposed = true;
+    if (this.decorationFrame !== undefined) cancelAnimationFrame(this.decorationFrame);
     this.removeInteractions?.();
     this.removeInteractions = undefined;
     this.synchronizedScroll.clear();
@@ -684,7 +694,7 @@ export class MergeController {
     const regions: Record<Pane, Region[]> = { left: [], result: [], right: [] };
     const ops: Record<Pane, { line: number; ops: Operation[] }[]> = { left: [], result: [], right: [] };
     const resultDoc = this.views.result.state.doc;
-    const words = this.settings.highlight === 'words';
+    const words = !this.init.large && this.settings.highlight === 'words';
     const policy = this.settings.ignore === 'whitespace' ? 'ignoreWhitespaces' : 'default';
     for (const c of this.changes) {
       const st = states[c.index];
@@ -759,12 +769,16 @@ export class MergeController {
         });
       }
     }
-    const h = this.settings.highlight;
+    const h = this.init.large && this.settings.highlight === 'words' ? 'lines' : this.settings.highlight;
     const url = (icon: string) => iconUrl(icon, this.dark);
     const folds = this.computeFolds();
     for (const p of ['left', 'result', 'right'] as Pane[]) {
       const v = this.views[p];
       const doc = v.state.doc;
+      const visible = this.init.large ? {
+        from: doc.lineAt(v.viewport.from).number - 1,
+        to: doc.lineAt(v.viewport.to).number,
+      } : undefined;
       v.dispatch({
         effects: [
           setMinimapRanges.of(regions[p].map(region => ({
@@ -773,8 +787,8 @@ export class MergeController {
             kind: region.kind,
             resolved: region.resolved,
           }))),
-          setDecorations.of(buildDecorations(doc, regions[p], h)),
-          setGutterClasses.of(gutterClasses(doc, regions[p])),
+          setDecorations.of(buildDecorations(doc, regions[p], h, visible)),
+          setGutterClasses.of(gutterClasses(doc, regions[p], visible)),
           setOperations.of(buildOperations(doc, ops[p], url)),
           setFolds.of(buildFolds(doc, folds[p])),
         ],

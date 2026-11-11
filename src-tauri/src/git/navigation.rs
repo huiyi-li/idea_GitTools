@@ -171,7 +171,7 @@ fn failure(error: &str) -> (String, Vec<String>) {
     (kind.into(), files)
 }
 
-fn hash_path(hash: &mut Sha256, path: &Path) -> Result<(), String> {
+pub(super) fn hash_path(hash: &mut Sha256, path: &Path) -> Result<(), String> {
     use std::io::Read;
     let metadata = match fs::symlink_metadata(path) {
         Ok(m) => m,

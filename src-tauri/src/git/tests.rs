@@ -44,12 +44,13 @@ fn query() -> LogQuery {
     }
 }
 
-fn request(path: &str) -> DiffRequest {
+pub(crate) fn request(path: &str) -> DiffRequest {
     DiffRequest {
         path: path.into(),
         old_path: None,
         revision: None,
         before_revision: None,
+        area: None,
     }
 }
 
@@ -125,6 +126,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             old_path: change.old_path,
             revision: None,
             before_revision: None,
+            area: None,
         })
         .await
         .unwrap();
@@ -139,6 +141,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             old_path: change.old_path,
             revision: Some(hash),
             before_revision: None,
+            area: None,
         })
         .await
         .unwrap();
@@ -388,6 +391,7 @@ async fn merge_details_compare_to_first_parent() {
             old_path: None,
             revision: Some(head),
             before_revision: None,
+            area: None,
         })
         .await
         .unwrap();

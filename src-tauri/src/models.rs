@@ -83,12 +83,21 @@ pub struct CommitDetails {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiffArea {
+    Staged,
+    Unstaged,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffRequest {
     pub path: String,
     pub old_path: Option<String>,
     pub revision: Option<String>,
     pub before_revision: Option<String>,
+    #[serde(default)]
+    pub area: Option<DiffArea>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -98,4 +107,7 @@ pub struct FileDiff {
     pub after: String,
     pub binary: bool,
     pub too_large: bool,
+    pub can_load: bool,
+    pub large: bool,
+    pub reason: String,
 }

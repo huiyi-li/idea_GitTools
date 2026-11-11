@@ -370,6 +370,7 @@ async fn comparison_is_a_read_only_snapshot_with_renames_deletions_and_binary_fi
                 old_path: change.old_path.clone(),
                 revision: Some(comparison.target.clone()),
                 before_revision: Some(comparison.base.clone()),
+                area: None,
             })
             .await
             .unwrap();

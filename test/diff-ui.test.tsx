@@ -109,13 +109,40 @@ test('worktree refreshes reread changed content and still report binary, large-f
     assert.equal(root.querySelector('.cm-editor'), null);
     file = { ...file, binary: false, tooLarge: true };
     show(request, 3);
-    await waitFor(() => root.textContent?.includes('超过 1 MiB'));
+    await waitFor(() => root.textContent?.includes('超过自动加载阈值'));
     failure = 'read failed';
     show(request, 4);
     await waitFor(() => root.querySelector('[role="alert"]')?.textContent?.includes(failure));
   } finally {
     render(null, root);
   }
+});
+
+test('large file loading is explicit and renders two hundred thousand changed lines with viewport highlights', async () => {
+  const calls: any[] = [];
+  const after = 'changed source line\n'.repeat(199_999);
+  globalThis.testBackend = async (_command: string, args: any) => {
+    calls.push(args);
+    return args.allowLarge
+      ? { before: '', after, binary: false, tooLarge: false, large: true }
+      : { before: '', after: '', binary: false, tooLarge: true, canLoad: true };
+  };
+  try {
+    show(target('large.txt'));
+    await waitFor(() => root.textContent?.includes('加载大文件'));
+    assert.equal(root.querySelector('.cm-editor'), null);
+    assert.equal(calls[0].allowLarge, false);
+    const load = [...root.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '加载大文件')!;
+    load.click();
+    await waitFor(() => root.querySelectorAll('.cm-editor').length === 2);
+    const view = EditorView.findFromDOM(root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement)!;
+    assert.equal(view.state.doc.lines, 200_000);
+    assert.equal(calls[1].allowLarge, true);
+    assert.ok(root.textContent?.includes('大文件模式'));
+    assert.ok(root.querySelectorAll('.line-added').length < 1000);
+    const minimap = [...root.querySelectorAll<HTMLInputElement>('input')].find(input => input.parentElement?.textContent?.includes('代码缩略图'))!;
+    assert.equal(minimap.disabled, true);
+  } finally { render(null, root); }
 });
 
 test('out-of-order file reads discard the old result before starting expensive analysis', async () => {

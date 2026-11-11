@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { Window } from 'happy-dom';
 import { render } from 'preact';
-import type { Status } from '../src/api';
+import type { Change, Status } from '../src/api';
 import { BrowserWorker } from './browser-worker';
 
 const window = new Window({ url: 'http://localhost' });
@@ -47,6 +47,8 @@ test('every static workbench and merge toolbar icon has a bundled asset', () => 
     'src/merge/MergeManager.tsx',
     'src/HistoryDialog.tsx',
     'src/CompareView.tsx',
+    'src/review/CommitReviewViewer.tsx',
+    'src/review/ReviewEditors.tsx',
   ]) {
     const source = readFileSync(file, 'utf8');
     for (const match of source.matchAll(/(?:name|icon)="([^"]+)"/g)) {
@@ -79,6 +81,11 @@ function fixture(
     historyError?: string;
     startConflict?: boolean;
     comparisonError?: string;
+    recent?: string[];
+    preview?: boolean;
+    largeMerge?: boolean;
+    changes?: Change[];
+    discardError?: string;
   } = {},
 ) {
   const calls: { command: string; args: any }[] = [];
@@ -129,6 +136,7 @@ function fixture(
     ],
   };
   if (options.clean) status.changes = [];
+  if (options.changes) status.changes = structuredClone(options.changes);
   let resolved = false;
   globalThis.testBackend = async (command: string, args: any) => {
     calls.push({ command, args: structuredClone(args) });
@@ -147,10 +155,30 @@ function fixture(
           changes: [{ path: 'src/example.ts', oldPath: null, index: 'M', workTree: ' ', conflict: false }],
         };
       case 'read_diff':
+        if (args.request.area) return {
+          before: args.request.area === 'staged' ? 'base\n' : 'staged\n',
+          after: args.request.area === 'staged' ? 'staged\n' : 'working\n', binary: false, tooLarge: false,
+        };
         return { before: 'base\n', after: 'updated\n', binary: false, tooLarge: false };
+      case 'read_commit_review': {
+        const snapshot = (text: string) => ({ path: args.path, revision: args.revision, state: 'text', text, fingerprint: text });
+        return { revision: args.revision, parent: 'b'.repeat(40), before: snapshot('before\n'), after: snapshot('after\n'),
+          current: { file: { ...snapshot('current\n'), revision: null }, branch: 'main', head: args.revision } };
+      }
       case 'stage_paths':
         status.changes[0].index = args.unstage ? ' ' : 'M';
         status.changes[0].workTree = args.unstage ? 'M' : ' ';
+        return '';
+      case 'preview_discard':
+        return { root: status.repository.root, mode: args.mode, paths: args.paths,
+          files: args.paths.map((path: string) => ({ path, delete: path === 'new.txt' })), fingerprint: 'discard-preview' };
+      case 'discard_changes':
+        if (options.discardError) throw Error(options.discardError);
+        status.changes = status.changes.flatMap(change => {
+          if (!args.request.paths.includes(change.path)) return [change];
+          if (args.request.mode === 'unstaged' && change.index !== ' ' && change.index !== '?') return [{ ...change, workTree: ' ' }];
+          return [];
+        });
         return '';
       case 'create_commit':
         status.changes = [];
@@ -198,8 +226,10 @@ function fixture(
           leftStage: 2,
           leftPresent: true,
           rightPresent: true,
-          editable: true,
-          reason: '',
+          editable: !options.largeMerge || !!args.allowLarge,
+          canLoad: !!options.largeMerge && !args.allowLarge,
+          large: !!options.largeMerge,
+          reason: options.largeMerge ? '大文件可按需加载' : '',
           markerSize: 7,
           progress: null,
         };
@@ -218,6 +248,8 @@ function fixture(
     }
   };
   localStorage.clear();
+  if (options.preview !== false) localStorage.setItem('log.diffPreview', 'true');
+  if (options.recent) localStorage.setItem('recent', JSON.stringify(options.recent));
   render(<App />, root);
   return calls;
 }
@@ -243,6 +275,196 @@ test('log layout loads the diff through its normal entry point and filters branc
   } finally {
     render(null, root);
   }
+});
+
+test('log defaults to file lists and opens the read-only three-pane viewer only on double click or Enter', async () => {
+  const calls = fixture(false, { preview: false });
+  try {
+    await waitFor(() => root.querySelector('.details-panel .file-select'));
+    const toggle = root.querySelector<HTMLInputElement>('.log-preview-toggle input')!;
+    assert.equal(toggle.checked, false);
+    const file = root.querySelector<HTMLButtonElement>('.details-panel .file-select')!;
+    file.click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(root.querySelector('.diff-editors'), null);
+    assert.equal(calls.filter(call => ['read_diff', 'read_commit_review'].includes(call.command)).length, 0);
+    file.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await waitFor(() => root.querySelectorAll('.commit-review-viewer .cm-editor').length === 3);
+    assert.equal(root.querySelector('.review-before .cm-content')?.textContent, 'before');
+    assert.equal(root.querySelector('.review-after .cm-content')?.textContent, 'after');
+    assert.equal(root.querySelector('.review-current .cm-content')?.textContent, 'current');
+    for (const editor of root.querySelectorAll('.commit-review-viewer .cm-content')) {
+      assert.equal(editor.getAttribute('contenteditable'), 'false');
+      assert.equal(editor.getAttribute('aria-readonly'), 'true');
+    }
+    button('关闭三栏查看器').click();
+    await waitFor(() => !root.querySelector('.commit-review-viewer'));
+    file.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await waitFor(() => root.querySelectorAll('.commit-review-viewer .cm-editor').length === 3);
+    button('关闭三栏查看器').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await waitFor(() => !root.querySelector('.commit-review-viewer'));
+    assert.equal(calls.some(call => ['save_merge', 'stage_paths', 'create_commit'].includes(call.command)), false);
+  } finally { render(null, root); }
+});
+
+test('inline preview toggles persist and retain the log element and saved splitter height', async () => {
+  fixture(false, { preview: false });
+  try {
+    await waitFor(() => root.querySelector('.commit-row'));
+    const log = root.querySelector('.history-panel');
+    const toggle = root.querySelector<HTMLInputElement>('.log-preview-toggle input')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-editors'));
+    const separator = root.querySelector<HTMLElement>('[aria-label="调整差异预览高度"]')!;
+    separator.parentElement!.getBoundingClientRect = () => new DOMRect(0, 0, 800, 700);
+    separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    await waitFor(() => localStorage.getItem('split.log-diff') === '286');
+    toggle.checked = false;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => !root.querySelector('.diff-editors'));
+    assert.equal(root.querySelector('.history-panel'), log);
+    assert.equal(separator.hidden, true);
+    toggle.checked = true;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-editors'));
+    assert.equal(separator.getAttribute('aria-valuenow'), '286');
+    assert.equal(root.querySelector('.history-panel'), log);
+    await waitFor(() => localStorage.getItem('log.diffPreview') === 'true');
+    render(null, root);
+    render(<App />, root);
+    await waitFor(() => root.querySelector('.diff-editors'));
+    assert.equal(root.querySelector<HTMLInputElement>('.log-preview-toggle input')!.checked, true);
+  } finally { render(null, root); }
+});
+
+function switchingFixture(recent?: string[]) {
+  const calls = fixture(false, { recent });
+  const original = globalThis.testBackend;
+  globalThis.testBackend = async (command: string, args: any) => {
+    const result = await original(command, args);
+    if (command === 'open_repository' && args.path === 'C:/next' ||
+        command === 'repository_status' && args.root === 'C:/next') {
+      const status = result as Status;
+      status.repository = { ...status.repository, root: 'C:/next', name: 'next', branch: 'next-main' };
+      status.branches = [{ ...status.branches[0], name: 'next-main', full: 'refs/heads/next-main' }];
+      status.changes = [{ path: 'src/next.ts', oldPath: null, index: ' ', workTree: 'M', conflict: false }];
+      return status;
+    }
+    if (command === 'read_log' && args.root === 'C:/next') {
+      return { ...result, commits: result.commits.map((commit: any) => ({ ...commit, subject: 'Next repository commit' })) };
+    }
+    if (command === 'commit_details' && args.root === 'C:/next') {
+      return { ...result, changes: [{ path: 'src/next.ts', oldPath: null, index: 'M', workTree: ' ', conflict: false }] };
+    }
+    return result;
+  };
+  return calls;
+}
+
+test('returning from the folder dialog switches repositories despite the window focus refresh', async () => {
+  const calls = switchingFixture();
+  const backend = globalThis.testBackend;
+  let releaseRefresh: (() => void) | undefined;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'repository_status' && args.root === 'C:/fixture') {
+      await new Promise<void>(resolve => { releaseRefresh = resolve; });
+    }
+    return backend(command, args);
+  };
+  (globalThis as any).testDialog = async () => {
+    window.dispatchEvent(new window.Event('focus'));
+    await Promise.resolve();
+    return 'C:/next';
+  };
+  try {
+    await waitFor(() => root.querySelector('.diff-editors'));
+    button('打开仓库 · Ctrl+O').click();
+    await waitFor(() => calls.some(call => call.command === 'open_repository' && call.args.path === 'C:/next'));
+    releaseRefresh?.();
+    await waitFor(() => root.querySelector('.repository-picker')?.textContent?.includes('next'));
+    await waitFor(() => root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
+    await waitFor(() => root.querySelector('.details-panel .file-name')?.textContent?.includes('next.ts'));
+    assert.ok(root.querySelector('.current-branch-chip')?.textContent?.includes('next-main'));
+    await waitFor(() => calls.some(call => call.command === 'read_diff' && call.args.root === 'C:/next'));
+    assert.deepEqual(JSON.parse(localStorage.getItem('recent')!), ['C:/next', 'C:/fixture']);
+  } finally {
+    releaseRefresh?.();
+    render(null, root);
+    delete (globalThis as any).testDialog;
+  }
+});
+
+test('repository arrow opens recent paths and switches the whole workspace', async () => {
+  const calls = switchingFixture(['C:/fixture', 'C:/next']);
+  try {
+    await waitFor(() => root.querySelector('.diff-editors'));
+    button('最近仓库').click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('打开最近仓库 C:/next').click();
+    await waitFor(() => root.querySelector('.repository-picker')?.textContent?.includes('next'));
+    await waitFor(() => root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
+    assert.equal(document.querySelector('.action-popup'), null);
+    assert.equal(calls.filter(call => call.command === 'open_repository' && call.args.path === 'C:/next').length, 1);
+    button('最近仓库').click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    assert.equal(button('打开最近仓库 C:/next').disabled, true);
+    assert.ok(button('打开其他仓库…'));
+  } finally { render(null, root); }
+});
+
+test('cancelled and failed folder selection preserve the current repository and release the opener', async () => {
+  const calls = fixture();
+  (globalThis as any).testDialog = async () => null;
+  try {
+    await waitFor(() => root.querySelector('.diff-editors'));
+    button('打开仓库 · Ctrl+O').click();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(calls.filter(call => call.command === 'open_repository').length, 1);
+    assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('fixture'));
+    (globalThis as any).testDialog = async () => { throw new Error('Folder dialog failed'); };
+    button('打开仓库 · Ctrl+O').click();
+    await waitFor(() => root.querySelector('[role="alert"]')?.textContent?.includes('Folder dialog failed'));
+    assert.equal(button('打开仓库 · Ctrl+O').disabled, false);
+    assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('fixture'));
+    const backend = globalThis.testBackend;
+    globalThis.testBackend = async (command: string, args: any) => {
+      if (command === 'open_repository' && args.path === 'C:/not-a-repository') throw new Error('Not a Git repository');
+      return backend(command, args);
+    };
+    (globalThis as any).testDialog = async () => 'C:/not-a-repository';
+    button('选择仓库文件夹').click();
+    await waitFor(() => root.querySelector('[role="alert"]')?.textContent?.includes('Not a Git repository'));
+    assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('fixture'));
+    assert.deepEqual(JSON.parse(localStorage.getItem('recent')!), ['C:/fixture']);
+  } finally { render(null, root); delete (globalThis as any).testDialog; }
+});
+
+test('late reads from the old repository cannot overwrite the new repository or show stale errors', async () => {
+  switchingFixture();
+  const backend = globalThis.testBackend;
+  let delay = false;
+  let rejectOldLog: ((error: Error) => void) | undefined;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (delay && command === 'read_log' && args.root === 'C:/fixture') {
+      return new Promise((_, reject) => { rejectOldLog = reject; });
+    }
+    return backend(command, args);
+  };
+  (globalThis as any).testDialog = async () => 'C:/next';
+  try {
+    await waitFor(() => root.querySelector('.diff-editors'));
+    delay = true;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true }));
+    await waitFor(() => rejectOldLog);
+    button('选择仓库文件夹').click();
+    await waitFor(() => root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
+    rejectOldLog!(new Error('Old repository read failed'));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('next'));
+    assert.ok(root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
+    assert.ok(!root.querySelector('[role="alert"]')?.textContent?.includes('Old repository read failed'));
+  } finally { render(null, root); delete (globalThis as any).testDialog; }
 });
 
 test('commit layout stages, unstages and commits through the existing commands', async () => {
@@ -271,6 +493,94 @@ test('commit layout stages, unstages and commits through the existing commands',
   } finally {
     render(null, root);
   }
+});
+
+async function openChanges() {
+  await waitFor(() => root.querySelector('.workspace-tabs'));
+  [...root.querySelectorAll<HTMLButtonElement>('.workspace-tabs button')].find(button => button.textContent?.startsWith('提交'))!.click();
+  await waitFor(() => root.querySelector('#commit-message'));
+}
+
+test('staged and unstaged lists request distinct comparisons for the same file', async () => {
+  const calls = fixture(false, { changes: [{ path: 'src/example.ts', oldPath: null, index: 'M', workTree: 'M', conflict: false }] });
+  try {
+    await openChanges();
+    const groups = root.querySelectorAll('.change-group');
+    (groups[0].querySelector('.file-select') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('.diff-panel')?.textContent?.includes('暂存区 ↔ 工作区'));
+    await waitFor(() => calls.some(call => call.command === 'read_diff' && call.args.request.area === 'unstaged'));
+    (groups[1].querySelector('.file-select') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('.diff-panel')?.textContent?.includes('HEAD ↔ 暂存区'));
+    await waitFor(() => calls.some(call => call.command === 'read_diff' && call.args.request.area === 'staged'));
+    assert.equal(calls.filter(call => call.command === 'read_diff' && call.args.request.area).at(-1)!.args.request.area, 'staged');
+  } finally { render(null, root); }
+});
+
+test('discarding unstaged changes requires confirmation and leaves staged changes accessible', async () => {
+  const calls = fixture(false, { changes: [{ path: 'src/example.ts', oldPath: null, index: 'M', workTree: 'M', conflict: false }] });
+  try {
+    await openChanges();
+    (root.querySelector('.change-group .file-select') as HTMLButtonElement).click();
+    const message = root.querySelector<HTMLTextAreaElement>('#commit-message')!;
+    message.value = 'pending message';
+    message.dispatchEvent(new window.Event('input', { bubbles: true }));
+    (root.querySelector('.change-group [aria-label="文件操作 src/example.ts"]') as HTMLButtonElement).click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('放弃未暂存更改…').click();
+    await waitFor(() => root.querySelector('[role="dialog"][aria-label="放弃未暂存更改"]'));
+    assert.equal(calls.some(call => call.command === 'discard_changes'), false);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    assert.equal(calls.some(call => call.command === 'create_commit'), false);
+    button('确认放弃更改').click();
+    await waitFor(() => !root.querySelector('[role="dialog"]'));
+    const request = calls.find(call => call.command === 'discard_changes')!.args.request;
+    assert.equal(request.mode, 'unstaged');
+    assert.deepEqual(request.paths, ['src/example.ts']);
+    assert.equal(root.querySelectorAll('.change-group')[0].querySelectorAll('.file-row').length, 0);
+    assert.equal(root.querySelectorAll('.change-group')[1].querySelectorAll('.file-row').length, 1);
+    assert.ok(root.querySelector('.diff-panel')?.textContent?.includes('HEAD ↔ 暂存区'));
+    assert.ok(button('取消暂存 src/example.ts').textContent?.includes('取消暂存'));
+  } finally { render(null, root); }
+});
+
+test('discard preview identifies new file deletion and cancelling never submits the operation', async () => {
+  const calls = fixture(false, { changes: [{ path: 'new.txt', oldPath: null, index: '?', workTree: '?', conflict: false }] });
+  try {
+    await openChanges();
+    button('全部放弃…').click();
+    await waitFor(() => root.querySelector('[role="dialog"]')?.textContent?.includes('删除 · new.txt'));
+    button('取消').click();
+    await waitFor(() => !root.querySelector('[role="dialog"]'));
+    assert.equal(calls.some(call => call.command === 'discard_changes'), false);
+    assert.equal(root.querySelectorAll('.file-row').length, 1);
+  } finally { render(null, root); }
+});
+
+test('discard failures retain the preview and allow a fresh preview before retrying', async () => {
+  const calls = fixture();
+  const backend = globalThis.testBackend;
+  let fail = true;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'discard_changes' && fail) throw Error('文件或暂存区已改变');
+    return backend(command, args);
+  };
+  try {
+    await openChanges();
+    button('本地更改操作').click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('放弃全部本地更改…').click();
+    await waitFor(() => root.querySelector('[role="dialog"][aria-label="放弃文件全部更改"]'));
+    button('确认放弃更改').click();
+    await waitFor(() => root.querySelector('[role="dialog"] [role="alert"]')?.textContent?.includes('已改变'));
+    assert.equal(button('确认放弃更改').disabled, true);
+    fail = false;
+    button('重新获取预览').click();
+    await waitFor(() => !button('确认放弃更改').disabled);
+    button('确认放弃更改').click();
+    await waitFor(() => !root.querySelector('[role="dialog"]'));
+    assert.equal(calls.find(call => call.command === 'discard_changes')!.args.request.mode, 'all');
+    assert.equal(root.querySelectorAll('.changes-files .file-row').length, 0);
+  } finally { render(null, root); }
 });
 
 test('merge manager opens from the workspace, applies an arrow and stages the resolved result', async () => {
@@ -303,6 +613,28 @@ test('merge manager opens from the workspace, applies an arrow and stages the re
   } finally {
     render(null, root);
   }
+});
+
+test('large conflicts opt in through the main merge manager and save through the existing workflow', async () => {
+  const calls = fixture(true, { largeMerge: true });
+  try {
+    await waitFor(() => root.querySelector('.workspace-tabs .operation'));
+    (root.querySelector('.workspace-tabs .operation') as HTMLButtonElement).click();
+    await waitFor(() => root.textContent?.includes('加载大文件'));
+    assert.equal(root.querySelector('.merge-editor'), null);
+    button('加载大文件').click();
+    await waitFor(() => root.querySelector('.mg-op[data-side="right"][data-action="apply"]'));
+    const reads = calls.filter(call => call.command === 'open_merge');
+    assert.equal(reads[0].args.allowLarge, false);
+    assert.equal(reads[1].args.allowLarge, true);
+    root.querySelector('.mg-op[data-side="right"][data-action="apply"]')!.dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await waitFor(() => !button('完成并暂存').disabled);
+    button('完成并暂存').click();
+    await waitFor(() => calls.some(call => call.command === 'save_merge'));
+    assert.equal(calls.find(call => call.command === 'save_merge')!.args.request.finish, true);
+  } finally { render(null, root); }
 });
 
 test('splitters resize, clamp, persist and reset without remounting their contents', async () => {

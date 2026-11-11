@@ -66,8 +66,8 @@ export default function MergeManager({
     return value;
   }
 
-  async function load(path: string) {
-    const value = await call<MergeDocument>('open_merge', { root, path });
+  async function load(path: string, allowLarge = false) {
+    const value = await call<MergeDocument>('open_merge', { root, path, allowLarge });
     setDocument(value);
     setRemaining(Number.POSITIVE_INFINITY);
     markDirty(false);
@@ -312,7 +312,17 @@ export default function MergeManager({
                     }}
                   />
                 ) : (
-                  <div class="empty">{document.reason}</div>
+                  <div class="empty">
+                    <p>{document.reason}</p>
+                    {document.canLoad && (
+                      <button
+                        disabled={!!busy}
+                        onClick={() => void run('加载大文件', () => load(document.path, true))}
+                      >
+                        加载大文件
+                      </button>
+                    )}
+                  </div>
                 )}
                 <div class="merge-footer">
                   <button

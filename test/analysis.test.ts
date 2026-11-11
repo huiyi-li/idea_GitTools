@@ -108,3 +108,42 @@ test('two-pane file diffs run in the real worker and preserve CRLF and final new
     }
   } finally { worker.close(); }
 });
+
+test('large text diffs retain exact line changes while the main event loop remains responsive', async () => {
+  const worker = new MergeAnalysis();
+  const lines = Array.from({ length: 100_000 }, (_, index) => `const value_${index} = ${index};`);
+  const before = lines.join('\n');
+  lines[50_000] = 'const value_50000 = updated;';
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 2);
+  try {
+    const result = await worker.diff(before, lines.join('\n'));
+    assert.deepEqual(result.changes, [{ line0: 50_000, line1: 50_000, deleted: 1, inserted: 1 }]);
+    assert.ok(ticks > 1);
+    assert.equal(result.simplified, undefined);
+  } finally { clearInterval(timer); worker.close(); }
+});
+
+test('timeout terminates a stalled worker, degrades read-only diff, and refuses an incomplete merge model', async () => {
+  let stopped = 0;
+  class StalledWorker {
+    onmessage = null;
+    onerror = null;
+    onmessageerror = null;
+    postMessage() {}
+    terminate() { stopped++; }
+  }
+  Object.defineProperty(globalThis, 'Worker', { configurable: true, value: StalledWorker });
+  try {
+    const diff = new MergeAnalysis(20);
+    const result = await diff.diff('before\r\n', 'after\r\n');
+    assert.equal(result.simplified, true);
+    assert.equal(result.before, 'before\n');
+    assert.deepEqual(result.changes, [{ line0: 0, line1: 0, deleted: 2, inserted: 2 }]);
+    assert.equal(diff.isClosed, true);
+    const merge = new MergeAnalysis(20);
+    await assert.rejects(merge.prepare(document()), /时间预算/);
+    assert.equal(merge.isClosed, true);
+    assert.equal(stopped, 2);
+  } finally { Object.defineProperty(globalThis, 'Worker', { configurable: true, value: BrowserWorker }); }
+});

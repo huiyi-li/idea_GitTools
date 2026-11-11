@@ -78,9 +78,11 @@ export const MergeEditor = forwardRef<
         analysis = new MergeAnalysis();
         const prepared = await analysis.prepare(data);
         if (!current) return;
+        if (data.large) analysis.close();
         value = new MergeController(
           {
             path: data.path,
+            large: data.large,
             fileName: data.path.split('/').pop()!,
             base: data.base,
             left: data.left,
@@ -95,10 +97,10 @@ export const MergeEditor = forwardRef<
             iterative: true,
             progress: prepared.progress,
           },
-          { ...DEFAULT_MERGE_SETTINGS },
+          { ...DEFAULT_MERGE_SETTINGS, highlight: data.large ? 'lines' : 'words' },
           document.body.classList.contains('ij-dark'),
           {
-            analysis,
+            analysis: data.large ? undefined : analysis,
             onError: (message) => {
               if (current) setError(message);
             },
@@ -112,7 +114,7 @@ export const MergeEditor = forwardRef<
           prepared.changes,
         );
         value.setLocked(locked.current);
-        value.setMinimap(minimapEnabled.current);
+        value.setMinimap(minimapEnabled.current && !data.large);
         const update = () => {
           const stats = value!.stats;
           setStats(stats);
@@ -145,6 +147,7 @@ export const MergeEditor = forwardRef<
   }, [busy, data.id]);
   return (
     <div class="merge-editor mg-root">
+      {data.large && <div class="message notice-message">大文件模式 · 行级合并</div>}
       {error && (
         <div class="message error-message" role="alert">
           {error}
@@ -251,7 +254,8 @@ export const MergeEditor = forwardRef<
           <label title="同时应用于文件 diff 和三栏合并，自动保存设置">
             <input
               type="checkbox"
-              checked={minimap}
+              checked={minimap && !data.large}
+              disabled={data.large}
               onChange={(event) => setMinimap(event.currentTarget.checked)}
             />
             代码缩略图

@@ -1,3 +1,4 @@
+use super::content::{FileSnapshot, SnapshotState, MAX_LARGE_FILE, MAX_LARGE_LINES};
 use super::{validate_path, Git, MAX_FILE, MAX_LINES};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -68,6 +69,8 @@ pub(super) struct MergeSession {
     crlf: bool,
     marker_size: usize,
     draft_path: PathBuf,
+    allow_large: bool,
+    editable: bool,
 }
 
 #[derive(Serialize)]
@@ -85,6 +88,8 @@ pub(crate) struct MergeDocument {
     left_present: bool,
     right_present: bool,
     editable: bool,
+    can_load: bool,
+    large: bool,
     reason: String,
     marker_size: usize,
     progress: Option<Progress>,
@@ -191,29 +196,29 @@ impl Git {
         })
     }
 
-    async fn merge_blob(&self, entry: Option<&Entry>) -> Result<Option<String>, String> {
+    async fn merge_blob(
+        &self,
+        entry: Option<&Entry>,
+        path: &str,
+        binary: bool,
+        allow_large: bool,
+    ) -> Result<FileSnapshot, String> {
         let Some(entry) = entry else {
-            return Ok(Some(String::new()));
+            return Ok(FileSnapshot::new(path, None, SnapshotState::Missing, &[]));
         };
-        let size = self
-            .text(&["cat-file", "-s", &entry.hash])
-            .await?
-            .trim()
-            .parse::<usize>()
-            .map_err(|e| e.to_string())?;
-        if size > MAX_FILE {
-            return Ok(None);
-        }
-        let bytes = self.bytes(&["cat-file", "blob", &entry.hash]).await?;
-        if bytes.contains(&0) {
-            return Ok(None);
-        }
-        Ok(String::from_utf8(bytes)
-            .ok()
-            .filter(|text| text.bytes().filter(|&b| b == b'\n').count() <= MAX_LINES))
+        self.blob_content(path, None, &entry.hash, binary, allow_large)
+            .await
     }
 
     pub(crate) async fn open_merge(&mut self, path: String) -> Result<MergeDocument, String> {
+        self.open_merge_with_options(path, false).await
+    }
+
+    pub(crate) async fn open_merge_with_options(
+        &mut self,
+        path: String,
+        allow_large: bool,
+    ) -> Result<MergeDocument, String> {
         validate_path(&path)?;
         let worktree_path = checked_path(&self.root, &path)?;
         let worktree = stamp(&worktree_path)?;
@@ -233,40 +238,39 @@ impl Git {
         let modes_supported = entries
             .iter()
             .all(|e| matches!(e.mode.as_str(), "100644" | "100755"));
-        let base = if modes_supported {
-            self.merge_blob(base_entry).await?
-        } else {
-            None
-        };
-        let left = if modes_supported {
-            self.merge_blob(left_entry).await?
-        } else {
-            None
-        };
-        let right = if modes_supported {
-            self.merge_blob(right_entry).await?
-        } else {
-            None
-        };
-        let working_bytes = super::read_worktree(&self.root, &path)?;
-        let working = working_bytes.and_then(|bytes| {
-            if bytes.contains(&0) {
-                None
-            } else {
-                String::from_utf8(bytes).ok()
-            }
-        });
+        let binary = !modes_supported || self.binary_path(&path, None).await?;
+        let base = self
+            .merge_blob(base_entry, &path, binary, allow_large)
+            .await?;
+        let left = self
+            .merge_blob(left_entry, &path, binary, allow_large)
+            .await?;
+        let right = self
+            .merge_blob(right_entry, &path, binary, allow_large)
+            .await?;
+        let working_snapshot = self.worktree_snapshot(&path, allow_large).await?;
+        let snapshots = [&base, &left, &right, &working_snapshot];
         let editable = modes_supported
-            && base.is_some()
-            && left.is_some()
-            && right.is_some()
-            && working
-                .as_ref()
-                .is_some_and(|text| text.bytes().filter(|&b| b == b'\n').count() <= MAX_LINES);
+            && snapshots
+                .iter()
+                .all(|file| matches!(file.state, SnapshotState::Text | SnapshotState::Missing));
+        let can_load = modes_supported
+            && !editable
+            && snapshots.iter().all(|file| {
+                matches!(file.state, SnapshotState::Text | SnapshotState::Missing) || file.can_load
+            });
+        let large = snapshots.iter().any(|file| file.large);
+        let working = matches!(
+            working_snapshot.state,
+            SnapshotState::Text | SnapshotState::Missing
+        )
+        .then_some(working_snapshot.text);
         let reason = if !modes_supported {
             "符号链接或子模块冲突请在外部工具处理"
+        } else if can_load {
+            "大文件可按需加载，支持 10 MiB / 200,000 行以内的文本合并"
         } else if !editable {
-            "二进制、非 UTF-8 或超出 1 MiB / 20,000 行限制的文件，可以选择保留一侧"
+            "二进制、非 UTF-8 或超出 10 MiB / 200,000 行的文件，可以选择保留一侧"
         } else {
             ""
         }
@@ -296,7 +300,7 @@ impl Git {
         let draft_path = directory.join(format!("{:x}.json", Sha256::digest(path.as_bytes())));
         let progress = if let Ok(file) = File::open(&draft_path) {
             let mut bytes = Vec::new();
-            file.take((MAX_FILE * 8 + 1) as u64)
+            file.take((MAX_LARGE_FILE * 8 + 1) as u64)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
             serde_json::from_slice::<Draft>(&bytes)
@@ -305,7 +309,7 @@ impl Git {
                     draft.entries == entries
                         && draft.operation_id == operation_id
                         && draft.worktree == worktree
-                        && validate_progress(&draft.progress).is_ok()
+                        && validate_progress(&draft.progress, allow_large).is_ok()
                 })
                 .map(|draft| draft.progress)
         } else {
@@ -350,13 +354,15 @@ impl Git {
             crlf: working.as_ref().is_some_and(|text| text.contains("\r\n")),
             marker_size,
             draft_path,
+            allow_large,
+            editable,
         });
         Ok(MergeDocument {
             id,
             path,
-            base: base.unwrap_or_default(),
-            left: left.unwrap_or_default(),
-            right: right.unwrap_or_default(),
+            base: base.text,
+            left: left.text,
+            right: right.text,
             working,
             left_title: if rebase {
                 format!("正在重放的提交 · {other}")
@@ -372,6 +378,8 @@ impl Git {
             left_present,
             right_present,
             editable,
+            can_load,
+            large,
             reason,
             marker_size,
             progress,
@@ -426,8 +434,11 @@ impl Git {
         let mut selected_mode = None;
         match request.choice.as_str() {
             "result" => {
+                if !session.editable {
+                    return Err("请先加载可编辑的文本合并内容".into());
+                }
                 let progress = request.progress.as_ref().ok_or("缺少合并结果")?;
-                let content = validate_progress(progress)?;
+                let content = validate_progress(progress, session.allow_large)?;
                 if request.finish
                     && (progress
                         .states
@@ -442,6 +453,14 @@ impl Git {
                 } else {
                     content
                 };
+                let limit = if session.allow_large {
+                    MAX_LARGE_FILE
+                } else {
+                    MAX_FILE
+                };
+                if content.len() > limit {
+                    return Err("合并结果超过文件大小限制".into());
+                }
                 atomic_write(&path, content.as_bytes(), Some(&session.worktree))?;
             }
             "left" | "right" if request.finish => {
@@ -632,10 +651,20 @@ fn atomic_write(path: &Path, bytes: &[u8], expected: Option<&str>) -> Result<(),
     Ok(())
 }
 
-fn validate_progress(progress: &Progress) -> Result<String, String> {
+fn validate_progress(progress: &Progress, allow_large: bool) -> Result<String, String> {
+    let line_limit = if allow_large {
+        MAX_LARGE_LINES
+    } else {
+        MAX_LINES
+    };
+    let byte_limit = if allow_large {
+        MAX_LARGE_FILE
+    } else {
+        MAX_FILE
+    };
     if progress.lines.is_empty()
-        || progress.lines.len() > MAX_LINES + 1
-        || progress.states.len() > MAX_LINES
+        || progress.lines.len() > line_limit
+        || progress.states.len() > line_limit
         || progress
             .lines
             .iter()
@@ -648,8 +677,8 @@ fn validate_progress(progress: &Progress) -> Result<String, String> {
         return Err("合并进度格式错误或行数过多".into());
     }
     let bytes = progress.lines.iter().map(String::len).sum::<usize>() + progress.lines.len() - 1;
-    if bytes > MAX_FILE {
-        return Err("合并结果超过 1 MiB".into());
+    if bytes > byte_limit {
+        return Err("合并结果超过文件大小限制".into());
     }
     Ok(progress.lines.join("\n"))
 }
@@ -666,7 +695,7 @@ fn has_markers(text: &str, size: usize) -> bool {
 
 // Match Git's own index.lock protocol. The temporary index retains all other
 // staged files. Git filters operate on it before a single atomic index replace.
-struct IndexTransaction {
+pub(super) struct IndexTransaction {
     index: PathBuf,
     lock: PathBuf,
     temporary: NamedTempFile,
@@ -674,7 +703,7 @@ struct IndexTransaction {
 }
 
 impl IndexTransaction {
-    fn new(index: &Path) -> Result<Self, String> {
+    pub(super) fn new(index: &Path) -> Result<Self, String> {
         let lock = index.with_file_name(format!(
             "{}.lock",
             index.file_name().ok_or("索引路径错误")?.to_string_lossy()
@@ -697,15 +726,19 @@ impl IndexTransaction {
             temporary_name: super::git_path(temporary.path()),
             temporary,
         };
-        fs::copy(index, transaction.temporary.path()).map_err(|e| e.to_string())?;
+        match fs::copy(index, transaction.temporary.path()) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
         Ok(transaction)
     }
 
-    fn temporary_path(&self) -> &str {
+    pub(super) fn temporary_path(&self) -> &str {
         &self.temporary_name
     }
 
-    fn commit(self) -> Result<(), String> {
+    pub(super) fn commit(self) -> Result<(), String> {
         fs::copy(self.temporary.path(), &self.lock).map_err(|e| e.to_string())?;
         OpenOptions::new()
             .write(true)

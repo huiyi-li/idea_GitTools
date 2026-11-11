@@ -193,6 +193,37 @@ input[type='checkbox'] {
   width: 1px;
   background: var(--separator);
 }
+.repository-switcher {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 280px;
+}
+.log-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.repository-switcher .repository-picker {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.repository-switcher .action-menu .tool-button {
+  height: 30px;
+  border-left: 1px solid var(--separator);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.recent-repository-label {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+}
 .repository-picker {
   display: flex;
   align-items: center;
@@ -595,9 +626,10 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  min-height: 38px;
+  flex-wrap: wrap;
   flex: none;
-  padding: 0 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-subtle);
 }
 .log-toolbar .search-field {
@@ -820,8 +852,9 @@ input[type='checkbox'] {
 }
 .file-action {
   margin-right: 5px;
-  padding: 2px;
-  width: 24px;
+  padding: 2px 5px;
+  flex-shrink: 0;
+  gap: 3px;
   height: 24px;
   display: flex;
   align-items: center;
@@ -849,7 +882,8 @@ input[type='checkbox'] {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  min-height: 30px;
+  flex-wrap: wrap;
   padding: 0 7px;
   font-size: 12px;
 }

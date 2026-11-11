@@ -19,6 +19,8 @@ export interface MergeDocument {
   leftPresent: boolean;
   rightPresent: boolean;
   editable: boolean;
+  canLoad?: boolean;
+  large?: boolean;
   reason: string;
   markerSize: number;
   progress: MergeProgress | null;

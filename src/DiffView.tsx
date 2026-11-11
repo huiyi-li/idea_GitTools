@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Compartment, EditorState, RangeSetBuilder, Text } from '@codemirror/state';
-import { Decoration, EditorView, lineNumbers } from '@codemirror/view';
+import { Compartment, EditorState, Text } from '@codemirror/state';
+import { EditorView, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { keymap } from '@codemirror/view';
 import { call, type DiffTarget, type FileDiff } from './api';
@@ -8,19 +8,9 @@ import { MergeAnalysis } from './merge/analysis-client';
 import type { PreparedDiff } from './merge/analysis';
 import { useMinimapPreference } from './ui/editor-preferences';
 import { codeMinimap, minimapRanges, type MinimapRange } from './ui/minimap';
+import { diffLineHighlights } from './ui/diff-highlights';
 
-function markedLines(doc: Text, ranges: { start: number; count: number }[], kind: string) {
-  const builder = new RangeSetBuilder<Decoration>();
-  const decoration = Decoration.line({ class: kind });
-  for (const range of ranges) {
-    for (let line = range.start + 1; line <= range.start + range.count && line <= doc.lines; line++) {
-      builder.add(doc.line(line).from, doc.line(line).from, decoration);
-    }
-  }
-  return builder.finish();
-}
-
-function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, string] }) {
+export function DiffEditors({ data, labels }: { data: PreparedDiff; labels?: [string, string] }) {
   const left = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
   const [sync, setSync] = useState(true);
@@ -31,9 +21,9 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
   const views = useRef<EditorView[]>([]);
   useEffect(() => {
     for (const view of views.current) {
-      view.dispatch({ effects: minimapMode.current.reconfigure(minimap ? codeMinimap() : []) });
+      view.dispatch({ effects: minimapMode.current.reconfigure(minimap && !data.large ? codeMinimap() : []) });
     }
-  }, [minimap]);
+  }, [minimap, data.large]);
   const synchronized = useRef(sync);
   synchronized.current = sync;
 
@@ -42,16 +32,6 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
     const before = Text.of(data.before.split('\n'));
     const after = Text.of(data.after.split('\n'));
     const changes = data.changes;
-    const removed = markedLines(
-      before,
-      changes.map((c) => ({ start: c.line0, count: c.deleted })),
-      'line-removed',
-    );
-    const added = markedLines(
-      after,
-      changes.map((c) => ({ start: c.line1, count: c.inserted })),
-      'line-added',
-    );
     const theme = EditorView.theme(
       {
         '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg-editor)', color: 'var(--fg)' },
@@ -71,8 +51,10 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
       lineNumbers(),
       keymap.of(defaultKeymap),
       EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
       theme,
-      minimapMode.current.of(minimapEnabled.current ? codeMinimap() : []),
+      minimapMode.current.of(minimapEnabled.current && !data.large ? codeMinimap() : []),
+      diffLineHighlights,
     ];
     const ranges = (side: 'before' | 'after'): MinimapRange[] =>
       changes.map((change) => ({
@@ -85,7 +67,6 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
       doc: before,
       extensions: [
         ...extensions,
-        EditorView.decorations.of(removed),
         minimapRanges.init(() => ranges('before')),
       ],
     });
@@ -94,7 +75,6 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
       doc: after,
       extensions: [
         ...extensions,
-        EditorView.decorations.of(added),
         minimapRanges.init(() => ranges('after')),
       ],
     });
@@ -179,13 +159,19 @@ function Editors({ data, labels }: { data: PreparedDiff; labels?: [string, strin
         <label title="同时应用于文件 diff 和三栏合并，自动保存设置">
           <input
             type="checkbox"
-            checked={minimap}
+            checked={minimap && !data.large}
+            disabled={data.large}
             onChange={(event) => setMinimap(event.currentTarget.checked)}
           />
           代码缩略图
         </label>
         <span>{labels?.[1] ?? '修改后'}</span>
       </div>
+      {(data.large || data.simplified) && (
+        <div class="message notice-message" role="status">
+          {data.simplified ? '差异计算超时，当前显示整块变化' : '大文件模式 · 行级比较'}
+        </div>
+      )}
       <div class="diff-editors">
         <div ref={left} />
         <div ref={right} />
@@ -206,7 +192,9 @@ function sameContents(left: FileDiff, right: FileDiff) {
     left.before === right.before &&
     left.after === right.after &&
     left.binary === right.binary &&
-    left.tooLarge === right.tooLarge
+    left.tooLarge === right.tooLarge &&
+    left.canLoad === right.canLoad &&
+    left.large === right.large
   );
 }
 
@@ -232,7 +220,7 @@ export function DiffView({
   labels?: [string, string];
 }) {
   const key = target
-    ? JSON.stringify([root, target.path, target.oldPath, target.revision, target.beforeRevision])
+    ? JSON.stringify([root, target.path, target.oldPath, target.revision, target.beforeRevision, target.area])
     : '';
   const [loaded, setLoaded] = useState<LoadedDiff | null>(null);
   const latest = useRef(loaded);
@@ -241,6 +229,9 @@ export function DiffView({
   const worker = useRef<MergeAnalysis>();
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const [phase, setPhase] = useState('');
+  const [allowedKey, setAllowedKey] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  const allowLarge = allowedKey === key;
   useEffect(
     () => () => {
       worker.current?.close();
@@ -261,7 +252,7 @@ export function DiffView({
       return;
     }
     const cached = cache.current.get(key);
-    if (target.revision && cached?.version === version) {
+    if (target.revision && cached?.version === version && !(allowLarge && cached.file.canLoad)) {
       cache.current.delete(key);
       cache.current.set(key, cached);
       latest.current = cached;
@@ -289,7 +280,7 @@ export function DiffView({
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const file = await call<FileDiff>('read_diff', { root, request: target });
+          const file = await call<FileDiff>('read_diff', { root, request: target, allowLarge });
           if (!current) return;
           const previous = latest.current?.key === key ? latest.current : cache.current.get(key);
           if (previous && sameContents(previous.file, file)) {
@@ -301,12 +292,16 @@ export function DiffView({
             return;
           }
           setPhase('正在计算差异…');
-          analysis = worker.current ?? new MergeAnalysis();
+          analysis = worker.current && !worker.current.isClosed ? worker.current : new MergeAnalysis();
           worker.current = analysis;
           analyzing = true;
           const prepared = await analysis.diff(file.before, file.after);
           analyzing = false;
-          publish({ key, version, file, prepared });
+          if (file.large || analysis.isClosed) {
+            analysis.close();
+            if (worker.current === analysis) worker.current = undefined;
+          }
+          publish({ key, version, file, prepared: { ...prepared, large: file.large } });
         } catch (error) {
           analyzing = false;
           analysis?.close();
@@ -326,7 +321,7 @@ export function DiffView({
         if (worker.current === analysis) worker.current = undefined;
       }
     };
-  }, [root, key, version]);
+  }, [root, key, version, allowLarge, attempt]);
 
   const cached = target?.revision ? cache.current.get(key) : undefined;
   const data = loaded?.key === key ? loaded : cached?.version === version ? cached : undefined;
@@ -336,13 +331,31 @@ export function DiffView({
     content = (
       <div class="empty error-text" role="alert">
         {error.message}
+        <button onClick={() => setAttempt((value) => value + 1)}>重试</button>
       </div>
     );
   else if (!data) content = <div class="empty">{phase || '正在读取文件…'}</div>;
   else if (data.file.tooLarge)
-    content = <div class="empty">文件超过 1 MiB 或 20,000 行，请使用外部编辑器查看。</div>;
+    content = (
+      <div class="empty">
+        <p>{data.file.reason || '文件超过自动加载阈值'}</p>
+        {data.file.canLoad && (
+          <button disabled={!!phase} onClick={() => setAllowedKey(key)}>加载大文件</button>
+        )}
+      </div>
+    );
   else if (data.file.binary) content = <div class="empty">二进制文件</div>;
-  else if (data.prepared) content = <Editors key={key} data={data.prepared} labels={labels} />;
+  else if (data.prepared)
+    content = (
+      <DiffEditors
+        key={key}
+        data={data.prepared}
+        labels={labels ?? (
+          target?.area === 'staged' ? ['HEAD', '暂存区'] :
+          target?.area === 'unstaged' ? ['暂存区', '工作区'] : undefined
+        )}
+      />
+    );
 
   return (
     <section class="diff-panel">
@@ -356,12 +369,19 @@ export function DiffView({
             {phase}
           </span>
         )}
+        {phase === '正在计算差异…' && (
+          <button onClick={() => worker.current?.close()}>取消计算</button>
+        )}
         <span class="muted">
           {target?.beforeRevision
             ? target.beforeRevision.slice(0, 8) + ' ↔ ' + target.revision?.slice(0, 8)
             : target?.revision
               ? target.revision.slice(0, 8)
-              : 'HEAD ↔ 工作区'}
+              : target?.area === 'staged'
+                ? 'HEAD ↔ 暂存区'
+                : target?.area === 'unstaged'
+                  ? '暂存区 ↔ 工作区'
+                  : 'HEAD ↔ 工作区'}
         </span>
       </div>
       {content}

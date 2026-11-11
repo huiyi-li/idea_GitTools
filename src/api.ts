@@ -58,6 +58,7 @@ export interface DiffTarget {
   oldPath: string | null;
   revision: string | null;
   beforeRevision?: string;
+  area?: 'staged' | 'unstaged';
 }
 
 export type HistoryAction = 'merge' | 'rebase' | 'cherry-pick' | 'revert';
@@ -87,6 +88,9 @@ export interface FileDiff {
   after: string;
   binary: boolean;
   tooLarge: boolean;
+  canLoad?: boolean;
+  large?: boolean;
+  reason?: string;
 }
 
 export function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {

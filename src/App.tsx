@@ -18,6 +18,7 @@ import {
   type Status,
 } from './api';
 import { DiffView } from './DiffView';
+import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { RepositorySidebar } from './RepositorySidebar';
 import { ActionMenu, FileIcon, Icon, Modal, Split, ToolButton } from './ui/controls';
@@ -30,6 +31,8 @@ import './navigation/style.css';
 
 const EMPTY_PAGE: LogPage = { commits: [], hasMore: false };
 const MergeManager = lazy(() => import('./merge/MergeManager'));
+const HostingView = lazy(() => import('./hosting/HostingView'));
+const CommitReviewViewer = lazy(() => import('./review/CommitReviewViewer'));
 type View = 'log' | 'changes';
 type Dialog = { kind: 'branch' | 'stash'; value: string };
 
@@ -37,14 +40,18 @@ function ChangeList({
   changes,
   selected,
   onSelect,
+  onOpen,
   onStage,
+  onDiscard,
   unstage,
   busy,
 }: {
   changes: Change[];
   selected: string | undefined;
   onSelect: (change: Change) => void;
+  onOpen?: (change: Change) => void;
   onStage?: (changes: Change[], unstage: boolean) => void;
+  onDiscard?: (changes: Change[], mode: DiscardMode) => void;
   unstage?: boolean;
   busy: boolean;
 }) {
@@ -59,6 +66,14 @@ function ChangeList({
           <button
             class="file-select"
             onClick={() => onSelect(change)}
+            onDblClick={() => { if (!busy) onOpen?.(change); }}
+            onKeyDown={(event) => {
+              if (onOpen && !busy && event.key === 'Enter') {
+                event.preventDefault();
+                onSelect(change);
+                onOpen(change);
+              }
+            }}
             title={change.oldPath ? `${change.oldPath} → ${change.path}` : change.path}
           >
             <span class={`file-status ${change.conflict ? 'conflict' : ''}`}>
@@ -79,7 +94,17 @@ function ChangeList({
               onClick={() => onStage([change], !!unstage)}
             >
               <Icon name={unstage ? 'general/remove' : 'general/add'} />
+              <span>{unstage ? '取消暂存' : '暂存'}</span>
             </button>
+          )}
+          {onDiscard && (
+            <ActionMenu label={`文件操作 ${change.path}`} text="操作" disabled={busy || change.conflict}>
+              {!unstage && (
+                <button onClick={() => onDiscard([change], 'unstaged')}>放弃未暂存更改…</button>
+              )}
+              {unstage && <button onClick={() => onStage?.([change], true)}>取消暂存</button>}
+              <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
+            </ActionMenu>
           )}
         </div>
       ))}
@@ -98,6 +123,8 @@ export function App() {
   const [view, setView] = useState<View>('log');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [discard, setDiscard] = useState<DiscardPreview | null>(null);
+  const [discardError, setDiscardError] = useState('');
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
   const [page, setPage] = useState<LogPage>(EMPTY_PAGE);
@@ -124,6 +151,9 @@ export function App() {
   const [commitContext, setCommitContext] = useState<{ commit: Commit; x: number; y: number } | null>(null);
   const [comparisonBranch, setComparisonBranch] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showHosting, setShowHosting] = useState(false);
+  const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
+  const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
   const [mergePath, setMergePath] = useState<string | null>(null);
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const gate = useRef(false);
@@ -135,6 +165,10 @@ export function App() {
     document.body.className = theme === 'light' ? 'ij-light' : 'ij-dark';
     save('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    try { save('log.diffPreview', diffPreview); } catch { /* Keep the session preference. */ }
+  }, [diffPreview]);
 
   useEffect(() => {
     let disposed = false;
@@ -201,9 +235,12 @@ export function App() {
     }
   }
 
-  async function openPath(path: string) {
-    await perform('打开仓库', async () => {
-      const next = await call<Status>('open_repository', { path });
+  async function openPath(path?: string) {
+    return perform('打开仓库', async () => {
+      // Keep the operation lock while the native dialog restores window focus.
+      const selectedPath = path ?? await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
+      if (typeof selectedPath !== 'string') return;
+      const next = await call<Status>('open_repository', { path: selectedPath });
       activeRoot.current = next.repository.root;
       setStatus(next);
       setPage(EMPTY_PAGE);
@@ -217,6 +254,8 @@ export function App() {
       setSearchInput('');
       setDialog(null);
       setOperationDialog(null);
+      setDiscard(null);
+      setDiscardError('');
       setNavigation(null);
       setNavigationResult(null);
       setRevisionInput(null);
@@ -227,6 +266,8 @@ export function App() {
       setCommitContext(null);
       setComparisonBranch(null);
       setMergePath(null);
+      setShowHosting(false);
+      setReview(null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
@@ -234,14 +275,8 @@ export function App() {
     });
   }
 
-  async function chooseRepository() {
-    if (gate.current) return;
-    try {
-      const path = await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
-      if (typeof path === 'string') await openPath(path);
-    } catch (e) {
-      setError(String(e));
-    }
+  function chooseRepository() {
+    return openPath();
   }
 
   async function refresh(path = activeRoot.current, openConflicts = false) {
@@ -250,6 +285,18 @@ export function App() {
     if (activeRoot.current === path) {
       setStatus(next);
       setVersion((v) => v + 1);
+      setTarget(previous => {
+        if (!previous || previous.revision !== null) return previous;
+        const matching = next.changes.filter((change) => change.path === previous.path);
+        const change = matching.find((change) =>
+          previous.area === 'staged' ? staged(change) : unstaged(change),
+        ) ?? matching[0];
+        if (!change) return null;
+        let area = previous.area;
+        if (area === 'unstaged' && !unstaged(change)) area = staged(change) ? 'staged' : undefined;
+        if (area === 'staged' && !staged(change)) area = unstaged(change) ? 'unstaged' : undefined;
+        return { ...previous, oldPath: change.oldPath, area };
+      });
       if (openConflicts && next.changes.some((change) => change.conflict)) setMergePath('');
     }
   }
@@ -276,10 +323,43 @@ export function App() {
   async function stageChanges(changes: Change[], unstage: boolean) {
     const paths = [
       ...new Set(
-        changes.flatMap((change) => (change.oldPath ? [change.path, change.oldPath] : [change.path])),
+        changes.flatMap((change) => {
+          if (change.oldPath && (change.index === 'R' || change.workTree === 'R')) {
+            return [change.path, change.oldPath];
+          }
+          return [change.path];
+        }),
       ),
     ];
     await mutate('stage_paths', { paths, unstage }, unstage ? '取消暂存' : '暂存');
+  }
+
+  async function previewDiscard(paths: string[], mode: DiscardMode) {
+    const path = activeRoot.current;
+    if (!path) return;
+    await perform('读取放弃更改预览', async () => {
+      const preview = await call<DiscardPreview>('preview_discard', { root: path, paths, mode });
+      if (activeRoot.current !== path) return;
+      setDiscard(preview);
+      setDiscardError('');
+    });
+  }
+
+  async function discardChanges() {
+    if (!discard) return;
+    const request = discard;
+    await perform('放弃本地更改', async () => {
+      try {
+        await call('discard_changes', { root: request.root, request });
+        setDiscard(null);
+        setDiscardError('');
+        setNotice(`已放弃 ${request.files.length} 个文件的${request.mode === 'unstaged' ? '未暂存' : '全部'}更改`);
+      } catch (error) {
+        setDiscardError(String(error));
+      } finally {
+        await refresh(request.root).catch(error => setError(String(error)));
+      }
+    });
   }
 
   async function commit() {
@@ -364,21 +444,21 @@ export function App() {
     setLoadingLog(true);
     void call<LogPage>('read_log', { root, query: { offset, search, branch } })
       .then((next) => {
-        if (!current) return;
+        if (!current || activeRoot.current !== root) return;
         setPage(next);
         setSelected((hash) =>
           next.commits.some((c) => c.hash === hash) ? hash : (next.commits[0]?.hash ?? null),
         );
       })
       .catch((e) => {
-        if (current) {
+        if (current && activeRoot.current === root) {
           setPage(EMPTY_PAGE);
           setSelected(null);
           setError(String(e));
         }
       })
       .finally(() => {
-        if (current) setLoadingLog(false);
+        if (current && activeRoot.current === root) setLoadingLog(false);
       });
     return () => {
       current = false;
@@ -399,7 +479,7 @@ export function App() {
     const timer = setTimeout(() => {
       void call<Details>('commit_details', { root, revision: selected })
         .then((next) => {
-          if (!current) return;
+          if (!current || activeRoot.current !== root) return;
           setDetails(next);
           setTarget((previous) => {
             const change =
@@ -409,10 +489,10 @@ export function App() {
           });
         })
         .catch((e) => {
-          if (current) setError(String(e));
+          if (current && activeRoot.current === root) setError(String(e));
         })
         .finally(() => {
-          if (current) setLoadingDetails(false);
+          if (current && activeRoot.current === root) setLoadingDetails(false);
         });
     }, 100);
     return () => {
@@ -452,7 +532,8 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (mergePath !== null || operationDialog || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null) return;
+      if (showHosting) return;
+      if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
         if (root) void perform('刷新', () => refresh());
@@ -473,7 +554,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, navigation, showRecovery, revisionInput, comparisonBranch]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, review]);
 
   function changeView(next: View) {
     setView(next);
@@ -486,8 +567,8 @@ export function App() {
   const selectedCommit = page.commits.find((commit) => commit.hash === selected);
   const historyDisabled =
     !!busy || !status?.repository.branch || status.repository.operation !== 'none' || !!status.changes.length;
-  const showLocalDiff = (change: Change) =>
-    setTarget({ path: change.path, oldPath: change.oldPath, revision: null });
+  const showLocalDiff = (change: Change, area: 'staged' | 'unstaged' = 'unstaged') =>
+    setTarget({ path: change.path, oldPath: change.oldPath, revision: null, area });
 
   return (
     <div class="desktop-app">
@@ -497,16 +578,43 @@ export function App() {
           <strong>IdeaGitTool</strong>
         </div>
         <span class="header-divider" />
-        <button
-          class="repository-picker"
-          onClick={() => void chooseRepository()}
-          disabled={!!busy}
-          title={root || '打开仓库 · Ctrl+O'}
-        >
-          <Icon name="nodes/folder" />
-          <span class="ellipsis">{status?.repository.name ?? '打开仓库'}</span>
-          <Icon name="general/chevronDown" />
-        </button>
+        <div class="repository-switcher">
+          <button
+            class="repository-picker"
+            aria-label="选择仓库文件夹"
+            onClick={() => void chooseRepository()}
+            disabled={!!busy}
+            title={root || '打开仓库 · Ctrl+O'}
+          >
+            <Icon name="nodes/folder" />
+            <span class="ellipsis">{status?.repository.name ?? '打开仓库'}</span>
+          </button>
+          <ActionMenu label="最近仓库" icon="general/chevronDown" disabled={!!busy}>
+            <div class="menu-caption">最近仓库</div>
+            {recent.map((path) => (
+              <button
+                key={path}
+                aria-label={`打开最近仓库 ${path}`}
+                disabled={path === root || !!busy}
+                title={path}
+                onClick={() => void openPath(path)}
+              >
+                <Icon name="nodes/folder" />
+                <span class="recent-repository-label">
+                  <strong class="ellipsis">{path.replaceAll('\\', '/').split('/').pop()}</strong>
+                  <small class="ellipsis muted">{path}</small>
+                </span>
+                {path === root && <span class="muted">当前</span>}
+              </button>
+            ))}
+            {!recent.length && <div class="menu-caption">暂无最近仓库</div>}
+            <hr />
+            <button disabled={!!busy} onClick={() => void chooseRepository()}>
+              <Icon name="general/open" />
+              打开其他仓库…
+            </button>
+          </ActionMenu>
+        </div>
         {status && (
           <span class="current-branch-chip">
             <Icon name="dvcs/branchLabel" />
@@ -518,6 +626,14 @@ export function App() {
         <div class="header-actions">
           <ToolButton icon="vcs/update" label="签出标签或提交 SHA" disabled={!root || !!busy} onClick={() => setRevisionInput('')} />
           <ToolButton icon="toolwindows/vcs" label="操作恢复与 Reflog" disabled={!root || !!busy} onClick={() => setShowRecovery(true)}><span>Reflog</span></ToolButton>
+          <ToolButton
+            icon="toolwindows/vcs"
+            label="托管平台 · GitHub / GitLab"
+            active={showHosting}
+            onClick={() => setShowHosting(!showHosting)}
+          >
+            <span>托管平台</span>
+          </ToolButton>
           {(['fetch', 'pull', 'push'] as const).map((action) => (
             <ToolButton
               icon={action === 'fetch' ? 'vcs/fetch' : action === 'pull' ? 'vcs/update' : 'vcs/push'}
@@ -563,7 +679,17 @@ export function App() {
         </div>
       )}
 
-      {!status ? (
+      {showHosting ? (
+        <Suspense fallback={<div class="empty">正在加载托管平台…</div>}>
+          <HostingView
+            localRoot={root}
+            onClose={() => setShowHosting(false)}
+            onOpen={async (path) => {
+              if (await openPath(path)) setShowHosting(false);
+            }}
+          />
+        </Suspense>
+      ) : !status ? (
         <main class="welcome">
           <div class="welcome-heading">
             <Icon name="toolwindows/vcs" />
@@ -652,9 +778,14 @@ export function App() {
                     vertical
                     second
                     label="调整差异预览高度"
+                    hideSecond={!diffPreview}
                   >
                     <section class="history-panel">
                       <div class="log-toolbar">
+                        <label class="log-preview-toggle">
+                          <input type="checkbox" checked={diffPreview} onChange={(event) => setDiffPreview(event.currentTarget.checked)} />
+                          显示 diff 预览
+                        </label>
                         <label class="search-field">
                           <Icon name="general/search" />
                           <input
@@ -712,7 +843,7 @@ export function App() {
                         />
                       </div>
                     </section>
-                    {mergePath === null ? (
+                    {diffPreview && mergePath === null && !review ? (
                       <DiffView root={root} target={target} version={version} />
                     ) : (
                       <div />
@@ -769,6 +900,7 @@ export function App() {
                           changes={details.changes}
                           selected={target?.path}
                           busy={!!busy}
+                          onOpen={(change) => setReview({ root, details, path: change.path })}
                           onSelect={(change) =>
                             setTarget({
                               path: change.path,
@@ -809,6 +941,9 @@ export function App() {
                   <div class="panel-heading">
                     <span>本地更改</span>
                     <span class="spacer" />
+                    <ActionMenu label="本地更改操作" text="操作" disabled={!!busy || !status.changes.length || !!conflicts.length}>
+                      <button onClick={() => void previewDiscard(status.changes.map(change => change.path), 'all')}>放弃全部本地更改…</button>
+                    </ActionMenu>
                     <ToolButton
                       icon="vcsimpl/stash"
                       label="保存到 Stash"
@@ -842,16 +977,24 @@ export function App() {
                             event.preventDefault();
                             void stageChanges(unstagedFiles, false);
                           }}
-                        />
+                        >暂存</ToolButton>
+                        <button
+                          disabled={!!busy || !unstagedFiles.length || !!conflicts.length}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void previewDiscard(unstagedFiles.map(change => change.path), 'unstaged');
+                          }}
+                        >全部放弃…</button>
                       </summary>
                       <ChangeList
                         changes={unstagedFiles}
-                        selected={target?.path}
+                        selected={target?.area === 'unstaged' ? target.path : undefined}
                         onSelect={(change) => {
                           if (change.conflict) setMergePath(change.path);
                           else showLocalDiff(change);
                         }}
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
+                        onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         busy={!!busy}
                       />
                     </details>
@@ -869,13 +1012,14 @@ export function App() {
                             event.preventDefault();
                             void stageChanges(stagedFiles, true);
                           }}
-                        />
+                        >取消暂存</ToolButton>
                       </summary>
                       <ChangeList
                         changes={stagedFiles}
-                        selected={target?.path}
-                        onSelect={showLocalDiff}
+                        selected={target?.area === 'staged' ? target.path : undefined}
+                        onSelect={(change) => showLocalDiff(change, 'staged')}
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
+                        onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         unstage
                         busy={!!busy}
                       />
@@ -950,6 +1094,19 @@ export function App() {
         </Suspense>
       )}
 
+      {review && (
+        <Suspense fallback={<div class="commit-review-loading" role="status">正在加载三栏查看器…</div>}>
+          <CommitReviewViewer
+            key={JSON.stringify([review.root, review.details.commit.hash, review.path])}
+            root={review.root}
+            details={review.details}
+            initialPath={review.path}
+            version={version}
+            onClose={() => setReview(null)}
+          />
+        </Suspense>
+      )}
+
       {operationDialog && (
         <HistoryDialog
           preview={operationDialog}
@@ -965,6 +1122,9 @@ export function App() {
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
         <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>
       </div>}
+      {discard && <DiscardDialog preview={discard} busy={!!busy} error={discardError}
+        onClose={() => setDiscard(null)} onConfirm={() => void discardChanges()}
+        onReload={() => void previewDiscard(discard.paths, discard.mode)} />}
       {navigation && <NavigationDialog key={`${navigation.preview.target}-${navigation.creating}`} preview={navigation.preview} creating={navigation.creating} busy={!!busy} result={navigationResult} error={navigationError}
         onClose={() => setNavigation(null)} onRun={(request) => void runNavigation(request)}
         onRetarget={(target) => void previewNavigation(target, navigation.preview.action)}

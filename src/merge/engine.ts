@@ -186,6 +186,7 @@ export function buildDecorations(
   doc: Text,
   regions: Region[],
   highlight: 'words' | 'lines' | 'none',
+  visible = { from: 0, to: doc.lines },
 ): DecorationSet {
   const items: { from: number; to: number; deco: Decoration }[] = [];
   for (const r of regions) {
@@ -193,13 +194,14 @@ export function buildDecorations(
     if (r.l0 === r.l1) {
       const atTop = r.l0 === 0;
       const lineNo = atTop ? 1 : Math.min(doc.lines, r.l0);
+      if (lineNo - 1 < visible.from || lineNo - 1 >= visible.to) continue;
       const line = doc.line(lineNo);
       const cls = `mg-${r.kind} ${atTop ? 'mg-sep-top' : 'mg-sep-bottom'} ${r.resolved ? 'mg-resolved' : ''}`;
       items.push({ from: line.from, to: line.from, deco: Decoration.line({ class: cls }) });
       continue;
     }
     const withInner = highlight === 'words' && !r.resolved && r.inner !== undefined;
-    for (let n = r.l0; n < r.l1 && n < doc.lines; n++) {
+    for (let n = Math.max(r.l0, visible.from); n < Math.min(r.l1, visible.to, doc.lines); n++) {
       const line = doc.line(n + 1);
       const cls = [`mg-${r.kind}`, 'mg-line'];
       if (r.resolved) cls.push('mg-resolved');
@@ -247,12 +249,12 @@ export const gutterClassField = StateField.define<RangeSet<GutterMarker>>({
   },
 });
 
-export function gutterClasses(doc: Text, regions: Region[]): RangeSet<GutterMarker> {
+export function gutterClasses(doc: Text, regions: Region[], visible = { from: 0, to: doc.lines }): RangeSet<GutterMarker> {
   const b = new RangeSetBuilder<GutterMarker>();
   const items: { pos: number; cls: string }[] = [];
   for (const r of regions) {
     if (r.l0 === r.l1 || r.resolved) continue;
-    for (let n = r.l0; n < r.l1 && n < doc.lines; n++) {
+    for (let n = Math.max(r.l0, visible.from); n < Math.min(r.l1, visible.to, doc.lines); n++) {
       items.push({
         pos: doc.line(n + 1).from,
         cls: `mg-g-${r.kind}${n === r.l0 ? ' mg-g-first' : ''}${n === r.l1 - 1 ? ' mg-g-last' : ''}`,

@@ -6,9 +6,12 @@ use tauri::Emitter;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
+mod content;
+pub(crate) mod discard;
 pub(crate) mod history;
-pub(crate) mod navigation;
 pub(crate) mod merge;
+pub(crate) mod navigation;
+pub(crate) mod review;
 
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
 const MAX_FILE: usize = 1024 * 1024;
@@ -44,7 +47,14 @@ impl Output {
     }
 }
 
-async fn read_limited(mut stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, String> {
+pub(crate) async fn read_limited(mut stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, String> {
+    read_with_limit(&mut stream, MAX_OUTPUT).await
+}
+
+async fn read_with_limit(
+    mut stream: impl AsyncRead + Unpin,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     let mut chunk = [0; 8192];
     loop {
@@ -52,8 +62,11 @@ async fn read_limited(mut stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, Str
         if count == 0 {
             return Ok(bytes);
         }
-        if bytes.len() + count > MAX_OUTPUT {
-            return Err("Git output exceeds 8 MiB. Narrow the query and try again.".into());
+        if bytes.len() + count > limit {
+            return Err(format!(
+                "Git output exceeds {} MiB. Narrow the query and try again.",
+                limit / 1024 / 1024
+            ));
         }
         bytes.extend_from_slice(&chunk[..count]);
     }
@@ -122,7 +135,8 @@ impl Git {
         input: Option<&[u8]>,
         env: &[(&str, &str)],
     ) -> Result<Output, String> {
-        self.execute_with_timeout(args, input, env, Duration::from_secs(120)).await
+        self.execute_with_timeout(args, input, env, Duration::from_secs(120))
+            .await
     }
 
     async fn execute_with_timeout(
@@ -172,7 +186,14 @@ impl Git {
         let stderr = child.stderr.take().ok_or("Git stderr is unavailable")?;
         let task = async {
             let (stdout, stderr, status, ()) = tokio::try_join!(
-                read_limited(stdout),
+                read_with_limit(
+                    stdout,
+                    if args.starts_with(&["cat-file", "blob"]) {
+                        content::MAX_LARGE_FILE
+                    } else {
+                        MAX_OUTPUT
+                    }
+                ),
                 read_limited(stderr),
                 async { child.wait().await.map_err(|e| e.to_string()) },
                 async {
@@ -405,49 +426,33 @@ impl Git {
         })
     }
 
-    async fn blob(&self, revision: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
-        let tree = self
-            .text(&["--literal-pathspecs", "ls-tree", "-z", revision, "--", path])
-            .await?;
-        if tree.is_empty() {
-            return Ok(Some(vec![]));
-        }
-        let header = tree.split('\t').next().ok_or("Invalid tree entry")?;
-        let fields: Vec<_> = header.split(' ').collect();
-        if fields.len() != 3 {
-            return Err("Invalid tree entry".into());
-        }
-        if fields[1] == "commit" {
-            return Ok(Some(
-                format!("Subproject commit {}\n", fields[2]).into_bytes(),
-            ));
-        }
-        if fields[1] != "blob" {
-            return Err("Select a file to view its diff.".into());
-        }
-        let size = self
-            .text(&["cat-file", "-s", fields[2]])
-            .await?
-            .trim()
-            .parse::<usize>()
-            .map_err(|e| e.to_string())?;
-        if size > MAX_FILE {
-            return Ok(None);
-        }
-        Ok(Some(self.bytes(&["cat-file", "blob", fields[2]]).await?))
+    pub async fn diff(&self, request: DiffRequest) -> Result<FileDiff, String> {
+        self.diff_with_options(request, false).await
     }
 
-    pub async fn diff(&self, request: DiffRequest) -> Result<FileDiff, String> {
+    pub async fn diff_with_options(
+        &self,
+        request: DiffRequest,
+        allow_large: bool,
+    ) -> Result<FileDiff, String> {
+        use content::{FileSnapshot, SnapshotState};
         validate_path(&request.path)?;
         let old_path = request.old_path.as_deref().unwrap_or(&request.path);
         validate_path(old_path)?;
+        if request.area.is_some()
+            && (request.revision.is_some() || request.before_revision.is_some())
+        {
+            return Err("历史文件比较不使用暂存区范围".into());
+        }
         let (before, after) = if let Some(before_revision) = request.before_revision {
             validate_hash(&before_revision)?;
             let revision = request.revision.as_deref().ok_or("请选择比较的两个提交")?;
             validate_hash(revision)?;
             (
-                self.blob(&before_revision, old_path).await?,
-                self.blob(revision, &request.path).await?,
+                self.blob_snapshot(Some(&before_revision), old_path, allow_large)
+                    .await?,
+                self.blob_snapshot(Some(revision), &request.path, allow_large)
+                    .await?,
             )
         } else if let Some(revision) = request.revision {
             validate_hash(&revision)?;
@@ -458,52 +463,77 @@ impl Git {
             validate_hash(hashes.next().ok_or("Select a commit to view its diff.")?)?;
             let before = if let Some(parent) = hashes.next() {
                 validate_hash(parent)?;
-                self.blob(parent, old_path).await?
+                self.blob_snapshot(Some(parent), old_path, allow_large)
+                    .await?
             } else {
-                Some(vec![])
+                FileSnapshot::new(old_path, None, SnapshotState::Missing, &[])
             };
-            (before, self.blob(&revision, &request.path).await?)
+            (
+                before,
+                self.blob_snapshot(Some(&revision), &request.path, allow_large)
+                    .await?,
+            )
         } else {
-            let before = if let Some(head) = self.head().await? {
-                self.blob(&head, old_path).await?
+            let before = if matches!(request.area, Some(DiffArea::Unstaged)) {
+                let indexed = self.index_snapshot(&request.path, allow_large).await?;
+                if indexed.state == SnapshotState::Missing && old_path != request.path {
+                    self.index_snapshot(old_path, allow_large).await?
+                } else {
+                    indexed
+                }
+            } else if let Some(head) = self.head().await? {
+                self.blob_snapshot(Some(&head), old_path, allow_large)
+                    .await?
             } else {
-                Some(vec![])
+                FileSnapshot::new(old_path, None, SnapshotState::Missing, &[])
             };
-            (before, read_worktree(&self.root, &request.path)?)
+            (
+                before,
+                if matches!(request.area, Some(DiffArea::Staged)) {
+                    self.index_snapshot(&request.path, allow_large).await?
+                } else {
+                    self.worktree_snapshot(&request.path, allow_large).await?
+                },
+            )
         };
-        let (Some(before), Some(after)) = (before, after) else {
-            return Ok(FileDiff {
-                before: String::new(),
-                after: String::new(),
-                binary: false,
-                too_large: true,
-            });
-        };
-        if before.contains(&0) || after.contains(&0) {
-            return Ok(FileDiff {
-                before: String::new(),
-                after: String::new(),
-                binary: true,
-                too_large: false,
-            });
+        if before.state == SnapshotState::Encoding || after.state == SnapshotState::Encoding {
+            return Err("This file is not UTF-8. Use an external editor to view it.".into());
         }
-        if before.iter().filter(|&&b| b == b'\n').count() > MAX_LINES
-            || after.iter().filter(|&&b| b == b'\n').count() > MAX_LINES
-        {
-            return Ok(FileDiff {
-                before: String::new(),
-                after: String::new(),
-                binary: false,
-                too_large: true,
-            });
+        let binary = [&before, &after]
+            .iter()
+            .any(|file| matches!(file.state, SnapshotState::Binary | SnapshotState::Submodule));
+        let too_large = !binary
+            && [&before, &after]
+                .iter()
+                .any(|file| file.state == SnapshotState::TooLarge);
+        let can_load = too_large
+            && [&before, &after]
+                .iter()
+                .filter(|file| file.state == SnapshotState::TooLarge)
+                .all(|file| file.can_load);
+        let large = before.large || after.large;
+        let reason = if can_load {
+            "文件超过自动加载阈值，可按需加载大文件"
+        } else {
+            "文件超过 10 MiB 或 200,000 行，请使用外部工具处理"
         }
+        .into();
         Ok(FileDiff {
-            before: String::from_utf8(before)
-                .map_err(|_| "This file is not UTF-8. Use an external editor to view it.")?,
-            after: String::from_utf8(after)
-                .map_err(|_| "This file is not UTF-8. Use an external editor to view it.")?,
-            binary: false,
-            too_large: false,
+            before: if binary || too_large {
+                String::new()
+            } else {
+                before.text
+            },
+            after: if binary || too_large {
+                String::new()
+            } else {
+                after.text
+            },
+            binary,
+            too_large,
+            can_load,
+            large,
+            reason,
         })
     }
 
@@ -524,6 +554,7 @@ impl Git {
                 "--literal-pathspecs",
                 "rm",
                 "--cached",
+                "--force",
                 "--ignore-unmatch",
                 "-r",
                 "--",
@@ -622,7 +653,7 @@ fn validate_hash(hash: &str) -> Result<(), String> {
     }
 }
 
-fn git_path(path: &Path) -> String {
+pub(crate) fn git_path(path: &Path) -> String {
     let path = path.to_string_lossy();
     if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
         format!("//{}", unc.replace('\\', "/"))
@@ -644,50 +675,6 @@ fn validate_path(path: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-fn read_worktree(root: &Path, relative: &str) -> Result<Option<Vec<u8>>, String> {
-    let path = root.join(relative);
-    // Verify the parent as well, so a symlinked directory cannot escape the repository.
-    if let Some(parent) = path.parent() {
-        match parent.canonicalize() {
-            Ok(parent) if !parent.starts_with(root) => {
-                return Err("File is outside the repository.".into())
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some(vec![])),
-            Err(e) => return Err(e.to_string()),
-            _ => {}
-        }
-    }
-    let metadata = match std::fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some(vec![])),
-        Err(e) => return Err(e.to_string()),
-    };
-    if metadata.file_type().is_symlink() {
-        return Ok(Some(
-            std::fs::read_link(path)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .as_bytes()
-                .to_vec(),
-        ));
-    }
-    if metadata.is_dir() {
-        return Ok(Some(b"Submodule or directory\n".to_vec()));
-    }
-    if metadata.len() > MAX_FILE as u64 {
-        return Ok(None);
-    }
-    // Limit the read too, since an external editor may grow the file after metadata().
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .map_err(|e| e.to_string())?
-        .take(MAX_FILE as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    Ok((bytes.len() <= MAX_FILE).then_some(bytes))
 }
 
 fn parse_status(bytes: &[u8]) -> Result<Vec<Change>, String> {

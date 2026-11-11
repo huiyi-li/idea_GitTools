@@ -25,6 +25,7 @@ export interface MergeProgress {
 }
 
 export interface MergeInit {
+  large?: boolean;
   path: string;
   fileName: string;
   /** Left = Yours, right = Theirs (already swapped during a rebase). */

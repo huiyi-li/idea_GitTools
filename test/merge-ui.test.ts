@@ -2,6 +2,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { DEFAULT_MERGE_SETTINGS, type MergeInit } from '../src/shared/mergeProtocol';
+import type { MergeChange } from '../src/shared/mergeModel';
 
 const window = new Window();
 for (const name of [
@@ -34,6 +35,7 @@ after(() => window.happyDOM.close());
 function editor(
   patch: Partial<MergeInit> = {},
   background?: ConstructorParameters<typeof MergeController>[3],
+  changes?: MergeChange[],
 ) {
   const root = document.createElement('div');
   root.className = 'mg-panes';
@@ -59,7 +61,7 @@ function editor(
     ...patch,
   };
   const controller = new MergeController(init, init.settings, true, background);
-  controller.mount(hosts, dividers);
+  controller.mount(hosts, dividers, undefined, changes);
   return {
     controller,
     hosts,
@@ -93,6 +95,26 @@ test('right gutter arrow accepts incoming text and left ignore resolves the conf
   } finally {
     e.close();
   }
+});
+
+test('large merge decorations remain viewport bounded and arrows preserve a hundred thousand lines', () => {
+  const base = 'base line\n'.repeat(99_999);
+  const right = 'incoming line\n'.repeat(99_999);
+  const changes: MergeChange[] = [{ index: 0, base: [0, 99_999], left: [0, 99_999], right: [0, 99_999],
+    kind: 'conflict', leftChange: true, rightChange: true, canResolve: false }];
+  const e = editor({ large: true, base, left: 'local line\n'.repeat(99_999), right }, undefined, changes);
+  try {
+    assert.equal(e.controller.views.result.state.doc.lines, 100_000);
+    assert.ok(e.root.querySelectorAll('.mg-line').length < 1000);
+    e.controller.setMinimap(true);
+    assert.equal(e.root.querySelector('.code-minimap'), null);
+    e.controller.apply(0, 'right', true);
+    assert.equal(e.controller.resultLines().join('\n'), right);
+    assert.equal(e.controller.stats.conflicts, 0);
+    assert.ok(e.root.querySelectorAll('.mg-line').length < 1000);
+    e.controller.undo();
+    assert.equal(e.controller.resultLines().join('\n'), base);
+  } finally { e.close(); }
 });
 
 test('Ctrl and Meta arrows resolve a whole conflict and support undo and redo', () => {

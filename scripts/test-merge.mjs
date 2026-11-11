@@ -14,13 +14,15 @@ try {
     'analysis.test',
     'diff-ui.test',
     'minimap.test',
+    'hosting-ui.test',
+    'review-ui.test',
     'navigation-ui.test',
   ];
   await build({
     entryPoints: [
       ...tests.map(
         (name) =>
-          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test', 'navigation-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
+          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test', 'hosting-ui.test', 'review-ui.test', 'navigation-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
       ),
       'test/analysis-worker.ts',
     ],
@@ -53,7 +55,7 @@ try {
             contents: `
               export const invoke = (command, args) => globalThis.testBackend(command, args);
               export const listen = async () => () => {};
-              export const open = async () => null;
+              export const open = async (...args) => globalThis.testDialog ? globalThis.testDialog(...args) : null;
               export const getCurrentWindow = () => ({ onCloseRequested: async () => () => {}, close: async () => {} });
             `,
           }));

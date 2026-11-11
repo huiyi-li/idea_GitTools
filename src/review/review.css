@@ -1,0 +1,130 @@
+.commit-review-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.modal.commit-review-viewer {
+  position: fixed;
+  inset: 12px;
+  width: auto;
+  max-width: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-control);
+}
+.review-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-direction: row;
+}
+.review-toolbar select {
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border-control);
+  border-radius: 4px;
+  padding: 4px;
+}
+.review-heading {
+  background: var(--bg);
+}
+.review-heading > .ellipsis {
+  max-width: 260px;
+}
+.review-files {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.review-files > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+}
+.review-files > button.selected {
+  background: var(--bg-selection);
+}
+.review-content,
+.review-editors-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.review-three-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.review-code-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  border-right: 1px solid var(--border-control);
+}
+.review-code-pane:last-child {
+  border-right: 0;
+}
+.review-code-pane > header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-control);
+  flex-shrink: 0;
+}
+.review-code-pane small {
+  color: var(--fg-info);
+  overflow-wrap: anywhere;
+}
+.review-editor-host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-editor);
+}
+.review-snapshot-note,
+.review-loading,
+.review-update-notice {
+  padding: 6px 10px;
+  color: var(--fg-info);
+  background: var(--bg-banner-info);
+  flex-shrink: 0;
+}
+.review-error {
+  padding: 8px 10px;
+  color: var(--fg-error);
+}
+.review-error button {
+  margin-left: 10px;
+}
+@media (max-width: 1100px) {
+  .commit-review-viewer > .split > .split-pane:first-child {
+    max-width: 180px;
+  }
+}

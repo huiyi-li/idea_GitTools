@@ -216,7 +216,7 @@ export function Modal({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const frame = requestAnimationFrame(() =>
-      panel.current?.querySelector<HTMLElement>('select, input, button:not(:disabled)')?.focus(),
+      panel.current?.querySelector<HTMLElement>('select, input, textarea, button:not(:disabled)')?.focus(),
     );
     return () => {
       cancelAnimationFrame(frame);
@@ -245,7 +245,7 @@ export function Modal({
           if (event.key === 'Tab') {
             const controls = Array.from(
               panel.current!.querySelectorAll<HTMLElement>(
-                'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
+                'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
               ),
             );
             const first = controls[0],
@@ -274,6 +274,7 @@ export function Split({
   min = 140,
   storageKey,
   label,
+  hideSecond = false,
 }: {
   children: [ComponentChildren, ComponentChildren];
   vertical?: boolean;
@@ -282,6 +283,7 @@ export function Split({
   min?: number;
   storageKey: string;
   label: string;
+  hideSecond?: boolean;
 }) {
   const [size, setSize] = useState(() => {
     try {
@@ -308,13 +310,15 @@ export function Split({
   const fixed = { flex: `0 0 clamp(${min}px, ${size}px, calc(100% - ${min + 5}px))` };
   return (
     <div ref={root} class={`split ${vertical ? 'vertical' : 'horizontal'}`}>
-      <div class="split-pane" style={!second ? fixed : undefined}>
+      <div class="split-pane" style={!hideSecond && !second ? fixed : undefined}>
         {children[0]}
       </div>
       <div
         class="split-handle"
+        hidden={hideSecond}
+        style={hideSecond ? { display: 'none' } : undefined}
         role="separator"
-        tabIndex={0}
+        tabIndex={hideSecond ? -1 : 0}
         aria-label={label}
         aria-orientation={vertical ? 'horizontal' : 'vertical'}
         aria-valuemin={min}
@@ -357,7 +361,7 @@ export function Split({
           remember(next);
         }}
       />
-      <div class="split-pane" style={second ? fixed : undefined}>
+      <div class="split-pane" hidden={hideSecond} style={hideSecond ? { display: 'none' } : second ? fixed : undefined}>
         {children[1]}
       </div>
     </div>
