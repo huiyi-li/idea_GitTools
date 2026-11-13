@@ -502,6 +502,15 @@ export function App() {
     });
   }
 
+  async function generateCommitMessage() {
+    const path = activeRoot.current;
+    if (!path) return;
+    await perform('生成提交说明', async () => {
+      const suggestion = await call<string>('generate_commit_message', { root: path });
+      setMessage(suggestion);
+    });
+  }
+
   function previewHistory(
     action: HistoryAction,
     target: { target: string; hash: string; label: string; parents?: string[] },
@@ -1250,6 +1259,7 @@ export function App() {
                   </div>
                   <div class="commit-panel">
                     <label for="commit-message">提交说明</label>
+                    <button type="button" disabled={!!busy || !stagedFiles.length} onClick={() => void generateCommitMessage()}>AI 提交说明</button>
                     <button disabled={!!busy || !status.repository.head || !['none', 'rebase'].includes(status.repository.operation)} onClick={() => setShowAmend(true)}>Amend 最近提交…</button>
                     <textarea
                       id="commit-message"

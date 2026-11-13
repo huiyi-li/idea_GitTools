@@ -769,6 +769,47 @@ impl Git {
         Ok(String::from_utf8_lossy(&result).trim().into())
     }
 
+    pub async fn generate_commit_message(&self) -> Result<String, String> {
+        let result = self
+            .execute(&["diff", "--cached", "--name-status"], None)
+            .await?
+            .checked()?;
+        let lines = String::from_utf8_lossy(&result)
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .map(|(status, path)| (status.chars().next().unwrap_or('M'), path.to_owned()))
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return Err("请先暂存需要提交的文件。".into());
+        }
+        let added = lines.iter().filter(|(status, _)| *status == 'A').count();
+        let deleted = lines.iter().filter(|(status, _)| *status == 'D').count();
+        let modified = lines.len().saturating_sub(added + deleted);
+        let scope = lines
+            .iter()
+            .map(|(_, path)| path.split('/').next().unwrap_or(path))
+            .take(3)
+            .collect::<Vec<_>>();
+        let scope = scope.join(", ");
+        let action = if added > 0 && modified == 0 && deleted == 0 {
+            "新增"
+        } else if deleted > 0 && added == 0 && modified == 0 {
+            "删除"
+        } else if modified > 0 && added == 0 && deleted == 0 {
+            "更新"
+        } else {
+            "调整"
+        };
+        let detail = if lines.len() == 1 {
+            lines[0].1.clone()
+        } else if scope.is_empty() {
+            format!("{} 个文件", lines.len())
+        } else {
+            format!("{} 等 {} 个文件", scope, lines.len())
+        };
+        Ok(format!("{}{}", action, detail))
+    }
+
     pub async fn checkout(&self, name: &str) -> Result<(), String> {
         let status = self.status().await?;
         let branch = status

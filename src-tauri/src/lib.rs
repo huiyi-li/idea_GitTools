@@ -128,6 +128,14 @@ async fn commit_details(
 }
 
 #[tauri::command]
+async fn generate_commit_message(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?.generate_commit_message().await
+}
+
+#[tauri::command]
 async fn read_diff(
     root: String,
     request: DiffRequest,
@@ -886,6 +894,7 @@ pub fn run() {
             bisect_reset,
             read_log,
             commit_details,
+            generate_commit_message,
             read_diff,
             read_commit_review,
             read_review_worktree,
