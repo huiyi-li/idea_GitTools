@@ -171,6 +171,22 @@ async fn unstage_selected_rename_clears_both_index_paths() {
 }
 
 #[tokio::test]
+async fn diagnostics_reports_repository_state_without_remote_urls() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    run(dir.path(), &["remote", "add", "origin", "https://user:secret@example.test/repo.git"]);
+    fs::write(dir.path().join("changed.txt"), "changed\n").unwrap();
+    let diagnostics = git.diagnostics().await.unwrap();
+    assert!(diagnostics.git_version.starts_with("git version "));
+    assert_eq!(diagnostics.root, git.root_string());
+    assert_eq!(diagnostics.branch.as_deref(), Some("main"));
+    assert_eq!(diagnostics.changed_files, 1);
+    assert_eq!(diagnostics.remote_names, vec!["origin"]);
+    assert_eq!(diagnostics.worktree_count, 1);
+    assert!(!format!("{diagnostics:?}").contains("secret"));
+}
+
+#[tokio::test]
 async fn log_handles_empty_decorations_search_and_detached_head() {
     let dir = fixture();
     let git = open(&dir).await;

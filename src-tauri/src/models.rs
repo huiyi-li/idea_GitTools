@@ -45,6 +45,24 @@ pub struct Status {
     pub stashes: Vec<Stash>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnostics {
+    pub git_version: String,
+    pub root: String,
+    pub git_dir: String,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    pub operation: String,
+    pub changed_files: usize,
+    pub staged_files: usize,
+    pub unstaged_files: usize,
+    pub remote_names: Vec<String>,
+    pub worktree_count: usize,
+    pub autocrlf: String,
+    pub commit_gpgsign: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogQuery {

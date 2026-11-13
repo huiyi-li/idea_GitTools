@@ -76,6 +76,25 @@ input[type='checkbox'] {
 .selectable {
   user-select: text;
 }
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  gap: 8px 14px;
+  max-height: 55vh;
+  overflow: auto;
+  padding: 8px 0;
+}
+
+.diagnostics-grid > strong {
+  color: var(--fg-info);
+  font-weight: 500;
+}
+
+.diagnostics-grid > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .mono {
   font-family: Consolas, 'Courier New', monospace;
 }

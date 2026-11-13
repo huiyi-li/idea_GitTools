@@ -73,6 +73,11 @@ async fn repository_status(root: String, state: State<'_, AppState>) -> Result<S
 }
 
 #[tauri::command]
+async fn git_diagnostics(root: String, state: State<'_, AppState>) -> Result<Diagnostics, String> {
+    active(&*state.0.lock().await, &root)?.diagnostics().await
+}
+
+#[tauri::command]
 async fn read_log(
     root: String,
     query: LogQuery,
@@ -803,6 +808,7 @@ pub fn run() {
             open_release_page,
             open_repository,
             repository_status,
+            git_diagnostics,
             read_log,
             commit_details,
             read_diff,

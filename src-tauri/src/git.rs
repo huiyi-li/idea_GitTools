@@ -263,6 +263,69 @@ impl Git {
         Ok((head.code == 0).then(|| String::from_utf8_lossy(&head.stdout).trim().to_owned()))
     }
 
+    pub async fn diagnostics(&self) -> Result<Diagnostics, String> {
+        let status = self.status().await?;
+        let git_dir = self
+            .text(&["rev-parse", "--absolute-git-dir"])
+            .await?
+            .trim()
+            .to_owned();
+        let git_version = self.text(&["--version"]).await?.trim().to_owned();
+        let remote_names = self
+            .text(&["remote"])
+            .await?
+            .lines()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let worktree_count = self
+            .text(&["worktree", "list", "--porcelain"])
+            .await?
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count();
+        let autocrlf = self
+            .execute(&["config", "--get", "core.autocrlf"], None)
+            .await?;
+        let commit_gpgsign = self
+            .execute(&["config", "--get", "commit.gpgsign"], None)
+            .await?;
+        Ok(Diagnostics {
+            git_version,
+            root: self.root_string(),
+            git_dir,
+            branch: status.repository.branch,
+            head: status.repository.head,
+            operation: status.repository.operation,
+            changed_files: status.changes.len(),
+            staged_files: status
+                .changes
+                .iter()
+                .filter(|change| change.index != ' ')
+                .count(),
+            unstaged_files: status
+                .changes
+                .iter()
+                .filter(|change| change.work_tree != ' ')
+                .count(),
+            remote_names,
+            worktree_count,
+            autocrlf: if autocrlf.code == 0 {
+                String::from_utf8_lossy(&autocrlf.stdout).trim().to_owned()
+            } else {
+                "未设置".into()
+            },
+            commit_gpgsign: if commit_gpgsign.code == 0 {
+                String::from_utf8_lossy(&commit_gpgsign.stdout)
+                    .trim()
+                    .to_owned()
+            } else {
+                "未设置".into()
+            },
+        })
+    }
+
     pub async fn repository(&self) -> Result<Repository, String> {
         let head = self.head().await?;
         let branch = self

@@ -32,6 +32,22 @@ export interface Status {
   stashes: { reference: string; hash: string; message: string }[];
 }
 
+export interface Diagnostics {
+  gitVersion: string;
+  root: string;
+  gitDir: string;
+  branch: string | null;
+  head: string | null;
+  operation: string;
+  changedFiles: number;
+  stagedFiles: number;
+  unstagedFiles: number;
+  remoteNames: string[];
+  worktreeCount: number;
+  autocrlf: string;
+  commitGpgsign: string;
+}
+
 export interface Commit {
   hash: string;
   parents: string[];

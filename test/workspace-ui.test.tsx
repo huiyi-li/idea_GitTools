@@ -36,6 +36,7 @@ globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 after(() => window.happyDOM.close());
 
 const { App } = await import('../src/App');
+const { DiagnosticsDialog } = await import('../src/DiagnosticsDialog');
 const { Split } = await import('../src/ui/controls');
 const root = document.body.appendChild(document.createElement('div'));
 
@@ -286,6 +287,31 @@ function fixture(
   render(<App />, root);
   return calls;
 }
+
+test('Git diagnostics shows read-only repository state', async () => {
+  const calls = fixture();
+  const backend = globalThis.testBackend;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'git_diagnostics') {
+      calls.push({ command, args: structuredClone(args) });
+      assert.equal(args.root, 'C:/fixture');
+      return {
+        gitVersion: 'git version 2.53.0', root: 'C:/fixture', gitDir: 'C:/fixture/.git',
+        branch: 'main', head: 'a'.repeat(40), operation: 'none', changedFiles: 1,
+        stagedFiles: 0, unstagedFiles: 1, remoteNames: ['origin'], worktreeCount: 1,
+        autocrlf: 'false', commitGpgsign: 'false',
+      };
+    }
+    return backend(command, args);
+  };
+  try {
+    render(<DiagnosticsDialog root="C:/fixture" onClose={() => {}} />, root);
+    await waitFor(() => document.querySelector('.diagnostics-grid'));
+    assert.ok(calls.some(call => call.command === 'git_diagnostics'), `diagnostics call missing: ${calls.map(call => call.command).join(',')}`);
+    assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('git version 2.53.0'));
+    assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('origin'));
+  } finally { render(null, root); }
+});
 
 test('advanced log filters combine conditions and save repository-specific presets', async () => {
   const calls = fixture();

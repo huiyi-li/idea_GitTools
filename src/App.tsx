@@ -38,6 +38,7 @@ import { HistoryDialog, historyLabels, type OperationPreview } from './HistoryDi
 import { CompareView } from './CompareView';
 import { NavigationDialog } from './navigation/NavigationDialog';
 import { RecoveryDialog } from './navigation/RecoveryDialog';
+import { DiagnosticsDialog } from './DiagnosticsDialog';
 import type { NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, OperationRecord, RecoveryOverview } from './navigation/types';
 import './navigation/style.css';
 
@@ -175,6 +176,7 @@ export function App() {
   const [commitContext, setCommitContext] = useState<{ commit: Commit; x: number; y: number } | null>(null);
   const [comparisonBranch, setComparisonBranch] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
   const [showHosting, setShowHosting] = useState(false);
   const [showClone, setShowClone] = useState(false);
@@ -600,7 +602,7 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (showUpdates) return;
-      if (showHosting || showClone || showRemotes || showManager || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
+      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -622,7 +624,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
 
   function changeView(next: View) {
     setView(next);
@@ -700,6 +702,7 @@ export function App() {
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
+            <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
           </ActionMenu>
           <ToolButton
             icon="general/add"
@@ -1191,7 +1194,7 @@ export function App() {
         </button>
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
-            (showHosting || showClone || showRemotes || showManager || branchDialog || showWorktrees || ignorePath !== null ||
+            (showHosting || showClone || showRemotes || showManager || showDiagnostics || branchDialog || showWorktrees || ignorePath !== null ||
               transfer || hunks || showAmend || showInteractive || fileHistory || mergePath !== null || review ||
               dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
@@ -1216,6 +1219,7 @@ export function App() {
       </footer>
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
+      {showDiagnostics && root && <DiagnosticsDialog key={root} root={root} onClose={() => setShowDiagnostics(false)} />}
       {showManager && root && <RepositoryManager key={`${root}-${managerTab}-${managerStash?.reference ?? ''}-${managerStash?.hash ?? ''}`} root={root}
         initialTab={managerTab} initialStash={managerStash} version={version} onClose={() => setShowManager(false)} onChanged={openConflicts => refresh(root, openConflicts)} />}
       {branchDialog && root && <BranchDialog key={`${root}-${branchDialog.branch.full}-${branchDialog.action}`} root={root} initialBranch={branchDialog.branch} action={branchDialog.action}
