@@ -1,6 +1,6 @@
 [package]
 name = "ideagittool-desktop"
-version = "0.4.2"
+version = "0.4.3"
 description = "Lightweight standalone IdeaGitTool Git client"
 authors = ["IdeaGitTool contributors"]
 license = "Apache-2.0"

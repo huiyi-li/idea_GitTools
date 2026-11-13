@@ -230,7 +230,7 @@ cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_
 
 `.github/workflows/release.yml` 在推送版本 tag 后验证三处版本一致性，执行测试、Clippy、签名打包和产物验签，然后创建带完整资源的 Release 草稿。支持重试上传草稿，已发布版本会拒绝覆盖。核对草稿后点击 Publish release，最新正式版本即可被客户端发现。仓库 Actions 需允许工作流写入仓库内容。
 
-准备发布时同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的应用版本，提交后创建并推送对应 tag。无需额外创建 release 分支。本次功能开发保留 `0.4.2`，已有 tag 与 Release 保持原状。首次使用应用内更新需先安装包含 updater 的构建。
+准备发布时同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的应用版本，提交后创建并推送对应 tag。首次使用应用内更新需先安装包含 updater 的构建。当前版本的更新内容见 [0.4.3 发布说明](docs/RELEASE_0.4.3.md)。
 
 安装向导支持选择“当前用户”或“所有用户”。安装到 `C:\Program Files\IdeaGitTool` 时选择“所有用户”，并允许 Windows 管理员授权。双模式安装包启动时可能弹出 UAC 提示，选择“当前用户”时也可能需要授权。
 
