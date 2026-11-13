@@ -179,6 +179,8 @@ export function App() {
   const [showClone, setShowClone] = useState(false);
   const [showRemotes, setShowRemotes] = useState(false);
   const [showManager, setShowManager] = useState(false);
+  const [managerTab, setManagerTab] = useState<'branches' | 'tags' | 'stashes'>('branches');
+  const [managerStash, setManagerStash] = useState<Status['stashes'][number]>();
   const [branchDialog, setBranchDialog] = useState<{ branch: Branch; action: 'rename' | 'delete' } | null>(null);
   const [showWorktrees, setShowWorktrees] = useState(false);
   const [ignorePath, setIgnorePath] = useState<string | null>(null);
@@ -441,6 +443,12 @@ export function App() {
     }
   }
 
+  function openManager(tab: 'branches' | 'stashes', stash?: Status['stashes'][number]) {
+    setManagerTab(tab);
+    setManagerStash(stash);
+    setShowManager(true);
+  }
+
   async function previewNavigation(target: string, action: NavigationAction = 'checkout', creating = false) {
     const path = activeRoot.current;
     if (!path) return;
@@ -674,7 +682,8 @@ export function App() {
         <div class="header-actions">
           <ActionMenu label="仓库工具" text="仓库" disabled={!root || !!busy}>
             <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
-            <button onClick={() => setShowManager(true)}>分支、标签与 Stash</button>
+            <button onClick={() => openManager('branches')}>分支、标签与 Stash</button>
+            <button onClick={() => openManager('stashes')}>储藏管理</button>
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
@@ -832,11 +841,15 @@ export function App() {
                     if (status.repository.head) void previewNavigation(item?.full ?? 'HEAD', 'checkout', true);
                     else setDialog({ kind: 'branch', value: '' });
                   }}
-                  onManage={() => setShowManager(true)}
+                  onManage={() => openManager('branches')}
                   onEdit={(branch, action) => setBranchDialog({ branch, action })}
                   onFetch={() => setTransfer('fetch')}
                   onStash={() => setDialog({ kind: 'stash', value: 'Work in progress' })}
-                  onApplyStash={(hash) => void mutate('apply_stash', { hash }, '应用 Stash')}
+                  onApplyStash={(stash, pop) => void mutate('edit_stash', { expected: status.stashes, request: {
+                    action: pop ? 'pop' : 'apply', hash: stash.hash, reference: stash.reference,
+                    message: '', keepIndex: false, includeUntracked: false, paths: [],
+                  } }, pop ? '弹出储藏' : '应用储藏', true)}
+                  onManageStash={(stash) => openManager('stashes', stash)}
                   onOpen={(path) => void openPath(path)}
                   onAction={branchAction}
                 />
@@ -1168,7 +1181,8 @@ export function App() {
       </footer>
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
-      {showManager && root && <RepositoryManager key={root} root={root} onClose={() => setShowManager(false)} onChanged={() => refresh(root, true)} />}
+      {showManager && root && <RepositoryManager key={`${root}-${managerTab}-${managerStash?.reference ?? ''}-${managerStash?.hash ?? ''}`} root={root}
+        initialTab={managerTab} initialStash={managerStash} version={version} onClose={() => setShowManager(false)} onChanged={openConflicts => refresh(root, openConflicts)} />}
       {branchDialog && root && <BranchDialog key={`${root}-${branchDialog.branch.full}-${branchDialog.action}`} root={root} initialBranch={branchDialog.branch} action={branchDialog.action}
         onClose={() => setBranchDialog(null)} onOpen={path => openPath(path, true)} onChanged={async renamed => {
           if (branch === branchDialog.branch.full) { setBranch(renamed ?? ''); setOffset(0); }

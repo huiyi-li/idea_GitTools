@@ -25,14 +25,21 @@ export function RepositoryManager({
   root,
   onClose,
   onChanged,
+  initialTab = 'branches',
+  initialStash,
+  version = 0,
 }: {
   root: string;
   onClose: () => void;
-  onChanged: () => Promise<void>;
+  onChanged: (openConflicts?: boolean) => Promise<void>;
+  initialTab?: 'branches' | 'tags' | 'stashes';
+  initialStash?: { reference: string; hash: string };
+  version?: number;
 }) {
   const [data, setData] = useState<Management>();
-  const [tab, setTab] = useState<'branches' | 'tags' | 'stashes'>('branches');
+  const [tab, setTab] = useState(initialTab);
   const [selected, setSelected] = useState('');
+  const [selectedStashHash, setSelectedStashHash] = useState('');
   const [remoteBranch, setRemoteBranch] = useState('');
   const [remoteConfirm, setRemoteConfirm] = useState(false);
   const [name, setName] = useState('');
@@ -42,6 +49,11 @@ export function RepositoryManager({
   const [force, setForce] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [keepIndex, setKeepIndex] = useState(false);
+  const [reinstateIndex, setReinstateIndex] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
+  const [stashBranchName, setStashBranchName] = useState('');
+  const [stashCompare, setStashCompare] = useState<'changes' | 'before-local' | 'after-local'>('changes');
+  const [comparisonVersion, setComparisonVersion] = useState(0);
   const [untracked, setUntracked] = useState(true);
   const [paths, setPaths] = useState<string[]>([]);
   const [files, setFiles] = useState<StashFile[]>([]);
@@ -54,12 +66,21 @@ export function RepositoryManager({
     setData(next);
     setRevision(next.status.repository.head ?? '');
     setRemote((previous) => previous || next.remotes[0]?.name || '');
+    setClearConfirm(false);
+    if (tab === 'stashes' && selected && (JSON.stringify(next.status.stashes) !== JSON.stringify(data?.status.stashes)
+      || !next.status.stashes.some(stash => stash.reference === selected && stash.hash === selectedStashHash))) {
+      setSelected('');
+      setSelectedStashHash('');
+    }
   }
   useEffect(() => {
     void load().catch((error) => setError(String(error)));
   }, [root]);
   useEffect(() => {
-    setSelected('');
+    setSelected(tab === 'stashes' ? initialStash?.reference ?? '' : '');
+    setSelectedStashHash(tab === 'stashes' ? initialStash?.hash ?? '' : '');
+    setStashBranchName('');
+    setClearConfirm(false);
     setRemoteConfirm(false);
     setRemoteBranch('');
     setConfirm(false);
@@ -70,11 +91,12 @@ export function RepositoryManager({
     setFiles([]);
   }, [tab]);
   useEffect(() => {
-    if (tab !== 'stashes' || !selected) return;
-    let current = true;
     setFile(null);
     setFiles([]);
-    const stash = data?.status.stashes.find((stash) => stash.reference === selected);
+    setStashCompare('changes');
+    if (tab !== 'stashes' || !selected) return;
+    let current = true;
+    const stash = data?.status.stashes.find((stash) => stash.reference === selected && stash.hash === selectedStashHash);
     if (!stash) return;
     void call<StashFile[]>('stash_files', { root, hash: stash.hash })
       .then((files) => {
@@ -86,26 +108,30 @@ export function RepositoryManager({
     return () => {
       current = false;
     };
-  }, [root, tab, selected, data?.status.stashes]);
+  }, [root, tab, selected, selectedStashHash, data?.status.stashes]);
   async function mutate(command: string, request: unknown) {
     if (busy) return;
     setBusy(true);
     setError('');
     try {
-      await call(command, { root, request });
+      await call(command, { root, request, ...(command === 'edit_stash' ? { expected: data?.status.stashes } : {}) });
       setSelected('');
+      setSelectedStashHash('');
+      setPaths([]);
       setConfirm(false);
     } catch (error) {
       setError(String(error));
     } finally {
       await load().catch((error) => setError(String(error)));
-      await onChanged().catch((error) => setError(String(error)));
+      const action = (request as { action?: string })?.action;
+      await onChanged(command === 'restore_stash_branch' || command === 'edit_stash' && (action === 'apply' || action === 'pop')).catch((error) => setError(String(error)));
       setBusy(false);
     }
   }
   const branch = data?.status.branches.find((branch) => branch.full === selected);
   const tag = data?.tags.find((tag) => tag.name === selected);
-  const stash = data?.status.stashes.find((stash) => stash.reference === selected);
+  const stash = data?.status.stashes.find((stash) => stash.reference === selected && stash.hash === selectedStashHash);
+  const invalidUntrackedSelection = !untracked && data?.status.changes.some(change => change.index === '?' && paths.includes(change.path));
   const selectedRemoteBranch = data?.status.branches.find((branch) => branch.full === remoteBranch);
   const branchRemote = data?.remotes
     .filter((remote) => selectedRemoteBranch?.name.startsWith(remote.name + '/'))
@@ -126,7 +152,7 @@ export function RepositoryManager({
       hash: stash?.hash ?? '',
       reference: stash?.reference ?? '',
       message: message || 'Work in progress',
-      keepIndex,
+      keepIndex: action === 'save' ? keepIndex : reinstateIndex,
       includeUntracked: untracked,
       paths,
     });
@@ -417,9 +443,11 @@ export function RepositoryManager({
             <select
               aria-label="选择 Stash"
               disabled={busy}
-              value={selected}
+              value={stash?.reference ?? ''}
               onChange={(event) => {
                 setSelected(event.currentTarget.value);
+                setSelectedStashHash(data?.status.stashes.find(stash => stash.reference === event.currentTarget.value)?.hash ?? '');
+                setStashBranchName('');
                 setConfirm(false);
               }}
             >
@@ -434,18 +462,18 @@ export function RepositoryManager({
           <label>
             <input
               type="checkbox"
-              checked={keepIndex}
+              checked={reinstateIndex}
               disabled={busy}
-              onChange={(event) => setKeepIndex(event.currentTarget.checked)}
+              onChange={(event) => setReinstateIndex(event.currentTarget.checked)}
             />
-            保存时保留暂存内容，恢复时还原暂存布局
+            恢复暂存区布局 · --index
           </label>
           <div class="modal-actions">
-            <button disabled={busy || !selected} onClick={() => stashAction('apply')}>
-              Apply
+            <button disabled={busy || !stash} onClick={() => stashAction('apply')}>
+              Apply · 应用并保留
             </button>
-            <button disabled={busy || !selected} onClick={() => stashAction('pop')}>
-              Pop
+            <button disabled={busy || !stash} onClick={() => stashAction('pop')}>
+              Pop · 弹出
             </button>
           </div>
           <label>
@@ -457,31 +485,47 @@ export function RepositoryManager({
             />
             确认删除所选 Stash
           </label>
-          <button disabled={busy || !selected || !confirm} onClick={() => stashAction('drop')}>
-            Drop
+          <button disabled={busy || !stash || !confirm} onClick={() => stashAction('drop')}>
+            Drop · 删除
           </button>
           <div class="modal-actions">
             {files.map((file) => (
-              <button key={file.path} onClick={() => setFile(file)}>
-                {file.path}
+              <button key={`${file.revision}-${file.path}`} disabled={busy} onClick={() => { setFile(file); setStashCompare('changes'); }}>
+                {file.path}{file.base ? '' : '（未跟踪文件）'}
               </button>
             ))}
           </div>
           {file && (
-            <div style={{ height: 320 }}>
+            <><div class="modal-actions">
+              <button aria-pressed={stashCompare === 'changes'} onClick={() => setStashCompare('changes')}>显示储藏差异</button>
+              <button aria-pressed={stashCompare === 'after-local'} onClick={() => setStashCompare('after-local')}>储藏版本与本地比较</button>
+              <button disabled={!file.base} aria-pressed={stashCompare === 'before-local'} onClick={() => setStashCompare('before-local')}>储藏基准与本地比较</button>
+              {stashCompare !== 'changes' && <button onClick={() => setComparisonVersion(value => value + 1)}>刷新本地比较</button>}
+            </div><div style={{ height: 320 }}>
               <DiffView
                 root={root}
-                version={0}
+                version={version + comparisonVersion}
                 target={{
                   path: file.path,
-                  oldPath: file.oldPath ?? null,
-                  revision: file.revision,
-                  beforeRevision: file.base,
+                  oldPath: stashCompare === 'after-local' ? null : file.oldPath ?? null,
+                  revision: stashCompare === 'changes' ? file.revision : null,
+                  beforeRevision: stashCompare === 'after-local' ? file.revision : file.base || undefined,
                 }}
+                labels={stashCompare === 'changes' ? [file.base ? '储藏基准' : '新增文件之前', '储藏版本'] : [stashCompare === 'after-local' ? '储藏版本' : '储藏基准', '当前工作区']}
               />
-            </div>
+            </div></>
           )}
+          <label>从储藏基准恢复到新分支<input aria-label="储藏恢复分支名称" value={stashBranchName} disabled={busy} onInput={event => setStashBranchName(event.currentTarget.value)} /></label>
+          <button disabled={busy || !stash || !stashBranchName.trim()} onClick={() => void mutate('restore_stash_branch', {
+            hash: stash!.hash, reference: stash!.reference, name: stashBranchName.trim(),
+            expectedHead: data!.status.repository.head, expectedBranch: data!.status.repository.branch,
+            expectedStashes: data!.status.stashes,
+          })}>从储藏创建并切换分支</button>
+          <p>从储藏的原始基准恢复文件及暂存布局，成功后删除该条储藏。发生冲突时保留储藏。</p>
+          <label><input type="checkbox" checked={clearConfirm} disabled={busy || !data?.status.stashes.length} onChange={event => setClearConfirm(event.currentTarget.checked)} />确认清空此仓库的 {data?.status.stashes.length ?? 0} 条储藏</label>
+          <button disabled={busy || !clearConfirm || !data?.status.stashes.length} onClick={() => void mutate('clear_stashes', data!.status.stashes)}>清空全部储藏</button>
           <h3>保存新的 Stash</h3>
+          <label><input type="checkbox" checked={keepIndex} disabled={busy} onChange={event => setKeepIndex(event.currentTarget.checked)} />保存后保留暂存内容 · --keep-index</label>
           <label>
             说明
             <input
@@ -508,7 +552,7 @@ export function RepositoryManager({
                   <input
                     type="checkbox"
                     checked={paths.includes(change.path)}
-                    disabled={busy}
+                    disabled={busy || (!untracked && change.index === '?' && !paths.includes(change.path))}
                     onChange={(event) =>
                       setPaths(
                         event.currentTarget.checked
@@ -522,11 +566,12 @@ export function RepositoryManager({
               ))}
           </div>
           <button
-            disabled={busy || !data?.status.changes.length}
+            disabled={busy || !data?.status.changes.length || invalidUntrackedSelection || data.status.changes.some(change => change.conflict)}
             onClick={() => stashAction('save')}
           >
             保存 Stash
           </button>
+          {invalidUntrackedSelection && <p class="error-text">开启“包含未跟踪文件”后可保存所选新增文件。</p>}
         </div>
       )}
       {job && (

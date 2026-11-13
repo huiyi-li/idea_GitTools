@@ -30,7 +30,7 @@ pub struct Branch {
     pub upstream: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Stash {
     pub reference: String,
     pub hash: String,

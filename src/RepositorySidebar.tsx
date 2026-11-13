@@ -15,6 +15,7 @@ export function RepositorySidebar({
   onFetch,
   onStash,
   onApplyStash,
+  onManageStash,
   onOpen,
   onAction,
   onManage,
@@ -29,7 +30,8 @@ export function RepositorySidebar({
   onCreate: (branch?: Branch) => void;
   onFetch: () => void;
   onStash: () => void;
-  onApplyStash: (hash: string) => void;
+  onApplyStash: (stash: Status['stashes'][number], pop?: boolean) => void;
+  onManageStash: (stash?: Status['stashes'][number]) => void;
   onOpen: (path: string) => void;
   onAction: (branch: Branch, action: BranchAction) => void;
   onManage: () => void;
@@ -37,6 +39,7 @@ export function RepositorySidebar({
 }) {
   const [search, setSearch] = useState('');
   const [context, setContext] = useState<{ branch: string; point: { x: number; y: number } }>();
+  const [stashContext, setStashContext] = useState<{ reference: string; point: { x: number; y: number } }>();
   const branches = status.branches.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
   const historyDisabled =
     !status.repository.head ||
@@ -160,6 +163,7 @@ export function RepositorySidebar({
               <span>Stash</span>
               <span class="tree-hint">{status.stashes.length}</span>
               <span class="spacer" />
+              <button disabled={busy} onClick={() => onManageStash()}>管理储藏</button>
               <ToolButton
                 icon="general/add"
                 label="保存工作区到 Stash"
@@ -173,17 +177,25 @@ export function RepositorySidebar({
               />
             </div>
             {status.stashes.map((stash) => (
-              <div class="stash-item" key={stash.hash}>
+              <div class="stash-item" key={`${stash.reference}-${stash.hash}-${stash.message}`}
+                onContextMenu={event => { event.preventDefault(); if (!busy) setStashContext({ reference: stash.reference, point: { x: event.clientX, y: event.clientY } }); }}>
                 <Icon name="vcsimpl/stash" />
-                <span class="ellipsis" title={stash.message}>
-                  {stash.message}
-                </span>
+                <button class="ellipsis" title={`${stash.reference} · ${stash.message}`} disabled={busy} onClick={() => onManageStash(stash)}>{stash.reference} · {stash.message}</button>
                 <ToolButton
                   icon="vcs/update"
                   label={`应用并保留 ${stash.message}`}
                   disabled={busy}
-                  onClick={() => onApplyStash(stash.hash)}
+                  onClick={() => onApplyStash(stash)}
                 />
+                <ActionMenu label={`储藏操作 ${stash.reference}`} disabled={busy} contextPoint={stashContext?.reference === stash.reference ? stashContext.point : undefined}>
+                  <div class="menu-caption">{stash.reference} · {stash.message}</div>
+                  <button onClick={() => onApplyStash(stash, true)}>弹出储藏</button>
+                  <button onClick={() => onApplyStash(stash)}>应用并保留储藏</button>
+                  <button onClick={() => onManageStash(stash)}>取消储藏／恢复到新分支…</button>
+                  <button onClick={() => onManageStash(stash)}>显示储藏差异／与本地比较…</button>
+                  <hr />
+                  <button onClick={() => onManageStash(stash)}>删除／清空储藏…</button>
+                </ActionMenu>
               </div>
             ))}
             {!status.stashes.length && <div class="sidebar-hint">暂无 Stash</div>}

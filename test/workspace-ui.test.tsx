@@ -86,6 +86,7 @@ function fixture(
     largeMerge?: boolean;
     changes?: Change[];
     discardError?: string;
+    stashes?: Status['stashes'];
   } = {},
 ) {
   const calls: { command: string; args: any }[] = [];
@@ -137,6 +138,7 @@ function fixture(
   };
   if (options.clean) status.changes = [];
   if (options.changes) status.changes = structuredClone(options.changes);
+  if (options.stashes) status.stashes = structuredClone(options.stashes);
   let resolved = false;
   let savedMerge: any = null;
   globalThis.testBackend = async (command: string, args: any) => {
@@ -151,6 +153,12 @@ function fixture(
         return { commits: [commit], hasMore: false };
       case 'read_worktrees':
         return { head: status.repository.head, branches: status.branches, entries: [{ path: status.repository.root, branch: `refs/heads/${status.repository.branch}`, current: true }] };
+      case 'edit_stash':
+        if (options.startConflict) {
+          status.changes = [{ path: 'src/example.ts', oldPath: null, index: 'U', workTree: 'U', conflict: true }];
+          throw Error('CONFLICT during stash apply');
+        }
+        return '';
       case 'edit_ref': {
         const request = args.request;
         const branch = status.branches.find(item => item.name === request.name)!;
@@ -765,6 +773,24 @@ test('whole-side resolution explicitly confirms overwriting an edited merge with
     assert.equal(writes[0].args.request.choice, 'right');
     assert.equal(writes[0].args.request.finish, true);
     await waitFor(() => !root.querySelector('.merge-editor'));
+  } finally { render(null, root); }
+});
+
+test('stash context actions pin duplicate entries and automatically open the conflict manager', async () => {
+  const stashes = [{ reference: 'stash@{0}', hash: 'd'.repeat(40), message: 'first' }, { reference: 'stash@{1}', hash: 'd'.repeat(40), message: 'second' }];
+  const calls = fixture(false, { clean: true, stashes, startConflict: true });
+  try {
+    await waitFor(() => root.querySelectorAll('.stash-item').length === 2);
+    root.querySelectorAll('.stash-item')[1].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 150, clientY: 250 }));
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('弹出储藏').click();
+    await waitFor(() => calls.some(call => call.command === 'edit_stash'));
+    const request = calls.find(call => call.command === 'edit_stash')!.args;
+    assert.equal(request.request.reference, 'stash@{1}');
+    assert.equal(request.request.hash, 'd'.repeat(40));
+    assert.deepEqual(request.expected, stashes);
+    await waitFor(() => root.querySelector('.merge-manager .mg-op'));
+    assert.equal(root.querySelectorAll('.stash-item').length, 2);
   } finally { render(null, root); }
 });
 

@@ -408,13 +408,18 @@ impl Git {
         }
         let (before, after) = if let Some(before_revision) = request.before_revision {
             validate_hash(&before_revision)?;
-            let revision = request.revision.as_deref().ok_or("请选择比较的两个提交")?;
-            validate_hash(revision)?;
+            if let Some(revision) = &request.revision {
+                validate_hash(revision)?;
+            }
             (
                 self.blob_snapshot(Some(&before_revision), old_path, allow_large)
                     .await?,
-                self.blob_snapshot(Some(revision), &request.path, allow_large)
-                    .await?,
+                if let Some(revision) = &request.revision {
+                    self.blob_snapshot(Some(revision), &request.path, allow_large)
+                        .await?
+                } else {
+                    self.worktree_snapshot(&request.path, allow_large).await?
+                },
             )
         } else if let Some(revision) = request.revision {
             validate_hash(&revision)?;

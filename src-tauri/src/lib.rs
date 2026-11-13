@@ -427,10 +427,11 @@ async fn edit_ref(
 async fn edit_stash(
     root: String,
     request: git::management::StashEdit,
+    expected: Option<Vec<Stash>>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     active(&*state.0.lock().await, &root)?
-        .edit_stash(request)
+        .edit_stash_snapshot(request, expected)
         .await
 }
 #[tauri::command]
@@ -441,6 +442,28 @@ async fn stash_files(
 ) -> Result<Vec<git::management::StashFile>, String> {
     active(&*state.0.lock().await, &root)?
         .stash_files(&hash)
+        .await
+}
+
+#[tauri::command]
+async fn clear_stashes(
+    root: String,
+    request: Vec<Stash>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .clear_stashes(request)
+        .await
+}
+
+#[tauri::command]
+async fn restore_stash_branch(
+    root: String,
+    request: git::management::StashBranch,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .restore_stash_branch(request)
         .await
 }
 #[tauri::command]
@@ -741,6 +764,8 @@ pub fn run() {
             edit_ref,
             edit_stash,
             stash_files,
+            clear_stashes,
+            restore_stash_branch,
             push_tag,
             delete_remote_ref,
             preview_hunks,

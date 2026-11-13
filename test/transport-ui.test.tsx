@@ -307,13 +307,63 @@ test('tag deletion requires confirmation and stash pop pins the selected object'
     await waitFor(() => host.querySelector('[aria-label="选择 Stash"]'));
     changeSelect('[aria-label="选择 Stash"]', 'stash@{0}');
     await waitFor(() => host.textContent?.includes('new.txt'));
-    button('Pop').click();
+    button('Pop · 弹出').click();
     await waitFor(() => writes.length === 2);
     assert.equal(writes[1].hash, head);
     assert.equal(writes[1].action, 'pop');
   } finally {
     render(null, host);
   }
+});
+
+test('stash comparisons use the selected snapshot and list changes invalidate duplicate-hash selections', async () => {
+  const old = [{ reference: 'stash@{0}', hash: head, message: 'first' }, { reference: 'stash@{1}', hash: head, message: 'second' }];
+  let shifted = false;
+  const reads: any[] = [];
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'repository_management') return { status: { ...status, stashes: shifted ? [{ reference: 'stash@{0}', hash: 'c'.repeat(40), message: 'new' }, { ...old[0], reference: 'stash@{1}' }, { ...old[1], reference: 'stash@{2}' }] : old }, tags: [], remotes: [] };
+    if (command === 'stash_files') return [{ path: 'file.txt', revision: head, base: 'b'.repeat(40) }];
+    if (command === 'read_diff') { reads.push(args.request); return { before: 'stash\n', after: 'working\n', binary: false, tooLarge: false }; }
+    throw Error(command);
+  };
+  render(<RepositoryManager root="C:/repo" initialTab="stashes" initialStash={old[1]} onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.textContent?.includes('file.txt'));
+    button('file.txt').click();
+    await waitFor(() => reads.length === 1);
+    button('储藏版本与本地比较').click();
+    await waitFor(() => reads.length === 2);
+    assert.equal(reads[1].beforeRevision, head);
+    assert.equal(reads[1].revision, null);
+    button('刷新本地比较').click();
+    await waitFor(() => reads.length === 3);
+    shifted = true;
+    button('重新读取').click();
+    await waitFor(() => (host.querySelector('[aria-label="选择 Stash"]') as HTMLSelectElement).value === '');
+    assert.equal(button('Pop · 弹出').disabled, true);
+    await waitFor(() => !host.querySelector('.diff-editors'));
+  } finally { render(null, host); }
+});
+
+test('stash clearing requires confirmation and forwards the complete reviewed list', async () => {
+  const stashes = [{ reference: 'stash@{0}', hash: head, message: 'saved' }];
+  let request: any;
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'repository_management') return { status: { ...status, stashes: request ? [] : stashes }, tags: [], remotes: [] };
+    if (command === 'clear_stashes') { request = args.request; return; }
+    throw Error(command);
+  };
+  render(<RepositoryManager root="C:/repo" initialTab="stashes" onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.querySelector('[aria-label="选择 Stash"] option[value="stash@{0}"]'));
+    assert.equal(button('清空全部储藏').disabled, true);
+    const confirm = [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(input => input.parentElement?.textContent?.includes('确认清空此仓库'))!;
+    confirm.click();
+    await waitFor(() => !button('清空全部储藏').disabled);
+    button('清空全部储藏').click();
+    await waitFor(() => request);
+    assert.deepEqual(request, stashes);
+  } finally { render(null, host); }
 });
 
 test('hunk staging uses the reviewed preview and reports a clean file after the last block', async () => {

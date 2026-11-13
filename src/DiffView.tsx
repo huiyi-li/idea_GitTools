@@ -390,7 +390,7 @@ export function DiffView({
         )}
         <span class="muted">
           {target?.beforeRevision
-            ? target.beforeRevision.slice(0, 8) + ' ↔ ' + target.revision?.slice(0, 8)
+            ? target.beforeRevision.slice(0, 8) + ' ↔ ' + (target.revision?.slice(0, 8) ?? '工作区')
             : target?.revision
               ? target.revision.slice(0, 8)
               : target?.area === 'staged'
