@@ -301,7 +301,7 @@ test('Git diagnostics shows read-only repository state', async () => {
         gitVersion: 'git version 2.53.0', root: 'C:/fixture', gitDir: 'C:/fixture/.git',
         branch: 'main', head: 'a'.repeat(40), operation: 'none', changedFiles: 1,
         stagedFiles: 0, unstagedFiles: 1, remoteNames: ['origin'], worktreeCount: 1,
-        autocrlf: 'false', commitGpgsign: 'false',
+        autocrlf: 'false', commitGpgsign: 'false', lfsAvailable: false, lfsFiles: 0,
       };
     }
     return backend(command, args);

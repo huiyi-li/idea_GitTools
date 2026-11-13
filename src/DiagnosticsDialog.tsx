@@ -48,6 +48,7 @@ export function DiagnosticsDialog({ root, onClose }: { root: string; onClose: ()
           <strong>Worktree</strong><span>{diagnostics.worktreeCount}</span>
           <strong>core.autocrlf</strong><span>{diagnostics.autocrlf}</span>
           <strong>commit.gpgsign</strong><span>{diagnostics.commitGpgsign}</span>
+          <strong>Git LFS</strong><span>{diagnostics.lfsAvailable ? `可用，${diagnostics.lfsFiles} 个文件` : '不可用'}</span>
         </div>
       )}
       <div class="modal-actions">

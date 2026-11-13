@@ -53,6 +53,8 @@ export interface Diagnostics {
   worktreeCount: number;
   autocrlf: string;
   commitGpgsign: string;
+  lfsAvailable: boolean;
+  lfsFiles: number;
 }
 
 export interface Commit {

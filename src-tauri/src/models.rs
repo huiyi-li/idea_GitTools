@@ -78,6 +78,8 @@ pub struct Diagnostics {
     pub worktree_count: usize,
     pub autocrlf: String,
     pub commit_gpgsign: String,
+    pub lfs_available: bool,
+    pub lfs_files: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

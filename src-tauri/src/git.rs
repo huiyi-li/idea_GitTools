@@ -407,6 +407,23 @@ impl Git {
         let commit_gpgsign = self
             .execute(&["config", "--get", "commit.gpgsign"], None)
             .await?;
+        let lfs = self.execute(&["lfs", "version"], None).await;
+        let lfs_available = lfs.as_ref().is_ok_and(|output| output.code == 0);
+        let lfs_files = if lfs_available {
+            self.execute(&["lfs", "ls-files", "-n"], None)
+                .await
+                .ok()
+                .filter(|output| output.code == 0)
+                .map(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .count()
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
         Ok(Diagnostics {
             git_version,
             root: self.root_string(),
@@ -439,6 +456,8 @@ impl Git {
             } else {
                 "未设置".into()
             },
+            lfs_available,
+            lfs_files,
         })
     }
 
