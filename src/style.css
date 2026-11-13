@@ -516,6 +516,21 @@ input[type='checkbox'] {
 .current-branch .branch-item {
   font-weight: 600;
 }
+.branch-tracking {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.branch-ahead {
+  color: var(--fg-success);
+}
+.branch-behind {
+  color: var(--fg-warning);
+}
 .branch-actions {
   position: absolute;
   right: 2px;

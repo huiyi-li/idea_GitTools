@@ -28,6 +28,8 @@ pub struct Branch {
     pub current: bool,
     pub remote: bool,
     pub upstream: String,
+    pub ahead: usize,
+    pub behind: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

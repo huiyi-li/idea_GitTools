@@ -115,6 +115,12 @@ export function RepositorySidebar({
                       >
                         <Icon name={item.current ? 'general/greenCheckmark' : 'dvcs/branchLabel'} />
                         <span class="ellipsis">{item.name}</span>
+                        {!item.remote && (item.ahead > 0 || item.behind > 0) && (
+                          <span class="branch-tracking" title={`${item.upstream} · 领先 ${item.ahead}，落后 ${item.behind}`}>
+                            {item.ahead > 0 && <span class="branch-ahead">↑{item.ahead}</span>}
+                            {item.behind > 0 && <span class="branch-behind">↓{item.behind}</span>}
+                          </span>
+                        )}
                       </button>
                       <div class="branch-actions">
                         <ActionMenu label={`分支操作 ${item.name}`} disabled={busy} contextPoint={context?.branch === item.full ? context.point : undefined}>

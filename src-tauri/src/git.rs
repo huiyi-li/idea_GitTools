@@ -505,7 +505,7 @@ impl Git {
         let branch_data = self
             .text(&[
                 "for-each-ref",
-                "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)%00%(symref)",
+                "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)",
                 "refs/heads",
                 "refs/remotes",
             ])
@@ -514,10 +514,11 @@ impl Git {
             .lines()
             .filter_map(|line| {
                 let parts: Vec<_> = line.split('\0').collect();
-                if parts.len() != 5 || !parts[4].is_empty() {
+                if parts.len() != 6 || !parts[5].is_empty() {
                     return None;
                 }
                 let remote = parts[0].starts_with("refs/remotes/");
+                let (ahead, behind) = parse_tracking(parts[4]);
                 Some(Branch {
                     name: parts[0]
                         .trim_start_matches(if remote {
@@ -531,6 +532,8 @@ impl Git {
                     current: parts[2] == "*",
                     remote,
                     upstream: parts[3].into(),
+                    ahead,
+                    behind,
                 })
             })
             .collect();
@@ -881,6 +884,25 @@ fn parse_status(bytes: &[u8]) -> Result<Vec<Change>, String> {
         });
     }
     Ok(changes)
+}
+
+fn parse_tracking(value: &str) -> (usize, usize) {
+    let mut ahead = 0;
+    let mut behind = 0;
+    for field in value.split(',').map(str::trim) {
+        let mut parts = field.split_whitespace();
+        let kind = parts.next();
+        let count = parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        match kind {
+            Some("ahead") => ahead = count,
+            Some("behind") => behind = count,
+            _ => {}
+        }
+    }
+    (ahead, behind)
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<Change>, String> {

@@ -268,6 +268,54 @@ async fn branches_and_stash_round_trip() {
 }
 
 #[tokio::test]
+async fn branch_status_reports_ahead_and_behind_counts() {
+    let dir = fixture();
+    let remote = tempfile::tempdir().unwrap();
+    run(remote.path(), &["init", "--bare"]);
+    let git = open(&dir).await;
+    fs::write(dir.path().join("file.txt"), "base\n").unwrap();
+    git.stage(vec!["file.txt".into()], false).await.unwrap();
+    git.commit("base").await.unwrap();
+    run(
+        dir.path(),
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+    );
+    run(dir.path(), &["push", "-u", "origin", "main"]);
+
+    fs::write(dir.path().join("file.txt"), "ahead\n").unwrap();
+    git.stage(vec!["file.txt".into()], false).await.unwrap();
+    git.commit("ahead").await.unwrap();
+    let status = git.status().await.unwrap();
+    let main = status.branches.iter().find(|branch| branch.current).unwrap();
+    assert_eq!((main.ahead, main.behind), (1, 0));
+
+    let other = tempfile::tempdir().unwrap();
+    run(
+        other.path(),
+        &["clone", "-b", "main", remote.path().to_str().unwrap(), "."],
+    );
+    fs::write(other.path().join("file.txt"), "remote\n").unwrap();
+    run(other.path(), &["add", "file.txt"]);
+    run(
+        other.path(),
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "remote",
+        ],
+    );
+    run(other.path(), &["push"]);
+    git.remote_action("fetch").await.unwrap();
+    let status = git.status().await.unwrap();
+    let main = status.branches.iter().find(|branch| branch.current).unwrap();
+    assert_eq!((main.ahead, main.behind), (1, 1));
+}
+
+#[tokio::test]
 async fn binary_large_file_and_literal_pathspecs() {
     let dir = fixture();
     let git = open(&dir).await;

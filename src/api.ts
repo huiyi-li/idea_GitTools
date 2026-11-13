@@ -23,6 +23,8 @@ export interface Branch {
   current: boolean;
   remote: boolean;
   upstream: string;
+  ahead: number;
+  behind: number;
 }
 
 export interface Status {
