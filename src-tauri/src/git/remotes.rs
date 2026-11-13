@@ -30,9 +30,15 @@ pub(crate) struct TransferRequest {
     pub set_upstream: bool,
     pub rebase: bool,
     pub force: bool,
+    #[serde(default = "default_prune")]
+    pub prune: bool,
     pub expected_remote: Option<String>,
     #[serde(default)]
     pub expected_remote_config: Option<Remote>,
+}
+
+fn default_prune() -> bool {
+    true
 }
 
 #[derive(Serialize)]
@@ -196,7 +202,11 @@ impl Git {
         let mut command = Command::new("git");
         command.current_dir(&self.root);
         if request.action == "fetch" {
-            command.args(["fetch", "--progress", "--prune", "--", &request.remote]);
+            command.args(["fetch", "--progress"]);
+            if request.prune {
+                command.arg("--prune");
+            }
+            command.args(["--", &request.remote]);
             return Ok(command);
         }
         if repository.head.is_none() || repository.branch.is_none() {
@@ -362,9 +372,27 @@ mod tests {
             set_upstream: true,
             rebase: false,
             force: false,
+            prune: true,
             expected_remote: None,
             expected_remote_config: Some(overview.remotes[0].clone()),
         };
+        let fetch = git
+            .transfer_command(TransferRequest {
+                action: "fetch".into(),
+                remote: "origin".into(),
+                branch: String::new(),
+                expected_head: request.expected_head.clone(),
+                expected_branch: request.expected_branch.clone(),
+                set_upstream: false,
+                rebase: false,
+                force: false,
+                prune: false,
+                expected_remote: None,
+                expected_remote_config: request.expected_remote_config.clone(),
+            })
+            .await
+            .unwrap();
+        assert!(!format!("{fetch:?}").contains("--prune"));
         let mut command = git.transfer_command(request.clone()).await.unwrap();
         assert!(command.output().await.unwrap().status.success());
         assert_eq!(

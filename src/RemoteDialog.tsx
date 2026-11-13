@@ -167,6 +167,7 @@ export function TransferDialog({
   const [remote, setRemote] = useState('');
   const [branch, setBranch] = useState('');
   const [setUpstream, setSetUpstream] = useState(true);
+  const [prune, setPrune] = useState(true);
   const [rebase, setRebase] = useState(false);
   const [force, setForce] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -236,6 +237,7 @@ export function TransferDialog({
             expectedHead: overview.head ?? '',
             expectedBranch: overview.branch ?? '',
             setUpstream,
+            prune,
             rebase,
             force,
             expectedRemote: remoteHash,
@@ -277,6 +279,17 @@ export function TransferDialog({
           </select>
         </label>
         {!overview?.remotes.length && overview && <p>请先从主工具栏“管理远程仓库”添加 Remote。</p>}
+        {action === 'fetch' && (
+          <label>
+            <input
+              type="checkbox"
+              checked={prune}
+              disabled={busy}
+              onChange={(event) => setPrune(event.currentTarget.checked)}
+            />
+            清理远程已删除的分支引用
+          </label>
+        )}
         {action !== 'fetch' && (
           <label>
             目标分支
