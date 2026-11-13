@@ -1286,6 +1286,18 @@ input[type='checkbox'] {
 .blame-table { border-collapse: collapse; width: 100%; }
 .blame-table td { padding: 2px 8px; vertical-align: top; white-space: nowrap; }
 .blame-table pre { margin: 0; }
+.multi-commit-row {
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px;
+  cursor: pointer;
+}
+.multi-commit-row[aria-pressed='true'] { background: var(--selection); }
+.multi-commit-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cm-inline-blame {
   margin-left: 18px;
   color: var(--fg-secondary);

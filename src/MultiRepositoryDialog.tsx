@@ -13,9 +13,33 @@ export function MultiRepositoryDialog({ currentRoot, onClose }: { currentRoot: s
   const [action, setAction] = useState<'fetch' | 'pull' | 'push'>('fetch');
   const [result, setResult] = useState<string[]>([]);
   const [commits, setCommits] = useState<MultiCommit[]>([]);
+  const [selectedCommit, setSelectedCommit] = useState<MultiCommit>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [newRoot, setNewRoot] = useState('');
+
+  async function applySelected(action: 'drop' | 'extract') {
+    if (!selectedCommit || busy) return;
+    const question = action === 'drop'
+      ? `确认从 ${selectedCommit.name} 删除提交 ${selectedCommit.commit.hash.slice(0, 8)}？这会重写该仓库的提交历史。`
+      : `确认把 ${selectedCommit.commit.hash.slice(0, 8)} 的修改提取到 ${selectedCommit.name} 当前分支？`;
+    if (!window.confirm(question)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await call<string>('multi_repository_history_action', {
+        root: selectedCommit.root,
+        revision: selectedCommit.commit.hash,
+        action,
+      });
+      setSelectedCommit(undefined);
+      await loadLog();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (currentRoot && !roots.includes(currentRoot)) {
@@ -91,10 +115,22 @@ export function MultiRepositoryDialog({ currentRoot, onClose }: { currentRoot: s
         <button disabled={busy || !roots.length} onClick={() => void sync()}>执行到所有仓库</button>
         <div class="hunk-list">{result.map((line) => <pre key={line}>{line}</pre>)}</div>
       </>}
-      {tab === 'log' && <div class="hunk-list">
-        {commits.map((item) => <section class="hunk-item" key={`${item.root}-${item.commit.hash}`}><div><code>{item.commit.hash.slice(0, 8)}</code> {item.commit.subject}</div><small>{item.name} · {item.commit.author} · {new Date(item.commit.time * 1000).toLocaleString('zh-CN')}</small></section>)}
+      {tab === 'log' && <>
+        <div class="hunk-list">
+        {commits.map((item) => <section class="hunk-item" key={`${item.root}-${item.commit.hash}`}>
+          <button class="multi-commit-row" disabled={busy} aria-pressed={selectedCommit?.root === item.root && selectedCommit.commit.hash === item.commit.hash} onClick={() => setSelectedCommit(item)}>
+            <div><code>{item.commit.hash.slice(0, 8)}</code> {item.commit.subject}</div>
+            <small>{item.name} · {item.commit.author} · {new Date(item.commit.time * 1000).toLocaleString('zh-CN')}</small>
+          </button>
+        </section>)}
         {!busy && !commits.length && <p class="muted">暂无提交记录。</p>}
-      </div>}
+        </div>
+        {selectedCommit && <div class="multi-commit-actions">
+          <span class="muted">已选择 {selectedCommit.commit.hash.slice(0, 8)} · {selectedCommit.name}</span>
+          <button disabled={busy} onClick={() => void applySelected('extract')}>提取选中修改</button>
+          <button class="navigation-danger" disabled={busy} onClick={() => void applySelected('drop')}>删除选中提交</button>
+        </div>}
+      </>}
       {error && <p class="error-text" role="alert">{error}</p>}
       <div class="modal-actions"><button disabled={busy} onClick={onClose}>关闭</button></div>
     </Modal>

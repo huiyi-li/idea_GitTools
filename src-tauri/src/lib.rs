@@ -7,7 +7,7 @@ mod update_tests;
 mod watcher;
 
 use git::discard::{DiscardMode, DiscardPreview};
-use git::history::{BranchComparison, HistoryRequest};
+use git::history::{BranchComparison, HistoryAction, HistoryRequest};
 use git::merge::{MergeDocument, MergeOverview, SaveMerge};
 use git::navigation::{
     NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, RecoveryOverview,
@@ -208,6 +208,62 @@ async fn multi_repository_sync(roots: Vec<String>, action: String) -> Result<Vec
         });
     }
     Ok(results)
+}
+
+#[tauri::command]
+async fn multi_repository_history_action(
+    root: String,
+    revision: String,
+    action: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let guard = state.0.lock().await;
+    let git = active(&*guard, &root)?;
+    match action.as_str() {
+        "drop" => {
+            let details = git.details(&revision).await?;
+            let base = details.commit.parents.first().cloned().unwrap_or_default();
+            let preview = git.preview_interactive(&base, "").await?;
+            let mut entries: Vec<_> = preview
+                .commits
+                .iter()
+                .map(|commit| git::interactive::RebaseEntry {
+                    hash: commit.hash.clone(),
+                    action: if commit.hash == revision { "drop".into() } else { "pick".into() },
+                    message: String::new(),
+                })
+                .collect();
+            if !entries.iter().any(|entry| entry.hash == revision) {
+                return Err("选中的提交不在当前分支的可重放范围内".into());
+            }
+            let mut command = git.interactive_command(preview, std::mem::take(&mut entries)).await?;
+            let output = command.output().await.map_err(|error| format!("删除提交失败：{error}"))?;
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+            }
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        }
+        "extract" => {
+            let repository = git.repository().await?;
+            let expected_head = repository.head.ok_or("当前仓库尚无提交")?;
+            let expected_branch = repository.branch.ok_or("当前仓库没有签出本地分支")?;
+            let details = git.details(&revision).await?;
+            if details.commit.parents.len() > 1 {
+                return Err("暂不支持直接提取合并提交，请在当前仓库提交图中选择主线后 Cherry-pick".into());
+            }
+            git.start_history(HistoryRequest {
+                action: HistoryAction::CherryPick,
+                target: revision.clone(),
+                target_hash: revision,
+                expected_head,
+                expected_branch,
+                merge_mode: Default::default(),
+                mainline: None,
+            })
+            .await
+        }
+        _ => Err("未知的多仓库提交操作".into()),
+    }
 }
 
 #[tauri::command]
@@ -974,6 +1030,7 @@ pub fn run() {
             write_patch_file,
             multi_repository_log,
             multi_repository_sync,
+            multi_repository_history_action,
             read_diff,
             read_commit_review,
             read_review_worktree,
