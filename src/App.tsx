@@ -198,6 +198,7 @@ export function App() {
   const updateInstallation = useRef(false);
   const pendingRefresh = useRef(false);
   const activeRoot = useRef('');
+  const startupOpen = useRef(true);
   const root = status?.repository.root ?? '';
 
   useEffect(() => {
@@ -274,7 +275,8 @@ export function App() {
     }
   }
 
-  async function openPath(path?: string, waitForRefresh = false) {
+  async function openPath(path?: string, waitForRefresh = false, initial = false) {
+    if (!initial) startupOpen.current = false;
     while (waitForRefresh && gate.current) {
       pendingRefresh.current = false;
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -284,6 +286,7 @@ export function App() {
       const selectedPath = path ?? await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
       if (typeof selectedPath !== 'string') return;
       const next = await call<Status>('open_repository', { path: selectedPath });
+      if (initial && !startupOpen.current) return;
       activeRoot.current = next.repository.root;
       setStatus(next);
       setPage(EMPTY_PAGE);
@@ -485,7 +488,8 @@ export function App() {
       .then(async (path) => {
         const session = readUpdateSession();
         const next = path || session?.root;
-        if (next && await openPath(next)) {
+        if (!startupOpen.current) return;
+        if (next && await openPath(next, false, true)) {
           if (session && (!path || path === session.root)) setMessage(session.message);
           if (session) save(UPDATE_SESSION, null);
         }

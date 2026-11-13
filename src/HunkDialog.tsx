@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, type Change } from './api';
 import { Modal } from './ui/controls';
 import { HunkLineEditor, changedLine } from './HunkLineEditor';
@@ -31,16 +31,27 @@ export function HunkDialog({
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<Record<number, number[]>>({});
   const [discardLines, setDiscardLines] = useState(false);
+  const loadGeneration = useRef(0);
   async function load() {
-    setPreview(await call<Preview>('preview_hunks', { root, path, area }));
-    setError('');
-    setDiscard(null);
-    setSelected({});
-    setIndex(0);
-    setDiscardLines(false);
+    const generation = ++loadGeneration.current;
+    try {
+      const next = await call<Preview>('preview_hunks', { root, path, area });
+      if (generation !== loadGeneration.current) return;
+      setPreview(next);
+      setError('');
+      setDiscard(null);
+      setSelected({});
+      setIndex(0);
+      setDiscardLines(false);
+    } catch (error) {
+      if (generation === loadGeneration.current) setError(String(error));
+    }
   }
   useEffect(() => {
-    void load().catch((error) => setError(String(error)));
+    void load();
+    return () => {
+      loadGeneration.current++;
+    };
   }, [root, path, area]);
   async function apply(index: number, discard: boolean) {
     if (!preview || busy) return;

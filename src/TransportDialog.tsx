@@ -52,8 +52,18 @@ export function TransportProgress({
           callbacks.current.onIdle(true);
           if (!done.current) {
             done.current = true;
-            await callbacks.current.onFinished?.(next.state);
-            if (next.state === 'done') await callbacks.current.onDone(next.directory);
+            try {
+              await callbacks.current.onFinished?.(next.state);
+            } catch (error) {
+              setError(String(error));
+            }
+            if (next.state === 'done') {
+              try {
+                await callbacks.current.onDone(next.directory);
+              } catch (error) {
+                setError(String(error));
+              }
+            }
           }
         }
       } catch (error) {

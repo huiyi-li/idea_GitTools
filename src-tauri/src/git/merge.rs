@@ -513,8 +513,7 @@ impl Git {
                     {
                         return Err("读取版本期间文件或 Git 操作发生变化，请重新读取".into());
                     }
-                    fs::rename(directory.path().join(&session.path), &path)
-                        .map_err(|e| e.to_string())?;
+                    replace_file(directory.path().join(&session.path), &path)?;
                 } else if path.exists() {
                     fs::remove_file(&path).map_err(|e| e.to_string())?;
                 }
@@ -667,8 +666,30 @@ pub(super) fn atomic_write(
             return Err("写入前文件发生变化，当前编辑内容已保留".into());
         }
     }
-    temp.persist(path).map_err(|e| e.to_string())?;
+    replace_file(temp.into_temp_path(), path)?;
     Ok(())
+}
+
+fn replace_file(source: impl AsRef<Path>, destination: &Path) -> Result<(), String> {
+    let source = source.as_ref();
+    #[cfg(windows)]
+    if destination.exists() {
+        let backup = NamedTempFile::new_in(destination.parent().ok_or("文件路径错误")?)
+            .map_err(|e| e.to_string())?;
+        fs::copy(destination, backup.path()).map_err(|e| e.to_string())?;
+        let backup = backup.into_temp_path();
+        fs::remove_file(destination).map_err(|e| e.to_string())?;
+        return match fs::rename(source, destination) {
+            Ok(()) => Ok(()),
+            Err(error) => match fs::rename(&backup, destination) {
+                Ok(()) => Err(error.to_string()),
+                Err(recovery) => Err(format!(
+                    "替换文件失败：{error}。恢复原文件失败：{recovery}"
+                )),
+            },
+        };
+    }
+    fs::rename(source, destination).map_err(|e| e.to_string())
 }
 
 fn validate_progress(progress: &Progress, allow_large: bool) -> Result<String, String> {
@@ -770,7 +791,7 @@ impl IndexTransaction {
             .open(&self.lock)
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())?;
-        fs::rename(&self.lock, &self.index).map_err(|e| e.to_string())?;
+        replace_file(&self.lock, &self.index)?;
         Ok(())
     }
 }

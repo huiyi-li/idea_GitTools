@@ -156,6 +156,21 @@ async fn rename_and_delete_diffs_include_previous_content() {
 }
 
 #[tokio::test]
+async fn unstage_selected_rename_clears_both_index_paths() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    fs::write(dir.path().join("old.txt"), "content\n").unwrap();
+    git.stage(vec!["old.txt".into()], false).await.unwrap();
+    git.commit("initial").await.unwrap();
+    run(dir.path(), &["mv", "old.txt", "new.txt"]);
+    git.stage(vec!["new.txt".into()], false).await.unwrap();
+    assert!(run(dir.path(), &["diff", "--cached", "--name-status"]).contains("new.txt"));
+    git.stage(vec!["new.txt".into()], true).await.unwrap();
+    assert!(run(dir.path(), &["diff", "--cached", "--name-status"]).is_empty());
+    assert!(run(dir.path(), &["status", "--porcelain"]).contains("new.txt"));
+}
+
+#[tokio::test]
 async fn log_handles_empty_decorations_search_and_detached_head() {
     let dir = fixture();
     let git = open(&dir).await;

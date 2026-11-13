@@ -35,7 +35,7 @@ Object.defineProperty(globalThis, 'Worker', {
   value: BrowserWorker,
 });
 after(() => window.happyDOM.close());
-const { CloneDialog } = await import('../src/TransportDialog');
+const { CloneDialog, TransportProgress } = await import('../src/TransportDialog');
 const host = document.createElement('div');
 document.body.append(host);
 async function waitFor(predicate: () => unknown) {
@@ -62,6 +62,32 @@ function submit() {
     .querySelector('form')!
     .dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
 }
+
+test('completed transport still invokes onDone when the refresh callback fails', async () => {
+  let done = 0;
+  (globalThis as any).testBackend = async (command: string) => {
+    if (command === 'transport_progress') {
+      return { id: 'job', state: 'done', directory: 'C:/repo', lines: [], prompt: null, error: '' };
+    }
+    throw Error(command);
+  };
+  render(
+    <TransportProgress
+      id="job"
+      onIdle={() => {}}
+      onFinished={async () => { throw new Error('refresh failed'); }}
+      onDone={() => { done++; }}
+    />,
+    host,
+  );
+  try {
+    await waitFor(() => done === 1);
+    assert.equal(done, 1);
+    assert.match(host.textContent ?? '', /refresh failed/);
+  } finally {
+    render(null, host);
+  }
+});
 
 test('URL clone infers a folder, requires no hosting account and opens the completed repository once', async () => {
   const calls: string[] = [];
@@ -400,6 +426,35 @@ test('hunk staging uses the reviewed preview and reports a clean file after the 
     assert.equal(applied.index, 0);
     assert.deepEqual(applied.preview, preview);
     assert.equal(applied.discard, false);
+  } finally {
+    render(null, host);
+  }
+});
+
+test('hunk reload keeps the newest preview when responses finish out of order', async () => {
+  const previews = [
+    { path: 'file.txt', area: 'unstaged', fingerprint: 'old', header: 'old', hunks: ['@@ old\\n-old\\n+old result\\n'] },
+    { path: 'file.txt', area: 'unstaged', fingerprint: 'new', header: 'new', hunks: ['@@ new\\n-old\\n+new result\\n'] },
+  ];
+  const resolvers: ((value: typeof previews[number]) => void)[] = [];
+  (globalThis as any).testBackend = async (command: string) => {
+    if (command === 'preview_hunks') return new Promise(resolve => resolvers.push(resolve));
+    throw Error(command);
+  };
+  render(
+    <HunkDialog root="C:/repo" path="file.txt" area="unstaged" onClose={() => {}} onChanged={async () => {}} />,
+    host,
+  );
+  try {
+    await waitFor(() => resolvers.length === 1);
+    button('重新读取变化块').click();
+    await waitFor(() => resolvers.length === 2);
+    resolvers[1](previews[1]);
+    await waitFor(() => host.textContent?.includes('+new result'));
+    resolvers[0](previews[0]);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.ok(host.textContent?.includes('+new result'));
+    assert.ok(!host.textContent?.includes('+old result'));
   } finally {
     render(null, host);
   }

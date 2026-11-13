@@ -229,6 +229,12 @@ impl Git {
         if fresh != preview {
             return Err("文件或暂存区已改变，请重新读取变化块".into());
         }
+        let path = super::discard::checked_path(&self.root, &fresh.path)?;
+        let expected_stamp = if discard {
+            Some(super::merge::stamp(&path)?)
+        } else {
+            None
+        };
         let hunk = fresh.hunks.get(index).ok_or("变化块已不存在")?;
         let patch = format!("{}{hunk}", fresh.header);
         let mut args = vec!["apply", "--recount", "--whitespace=nowarn"];
@@ -256,6 +262,9 @@ impl Git {
         )
         .await?
         .checked()?;
+        if discard && super::merge::stamp(&path)? != expected_stamp.as_deref().unwrap_or("") {
+            return Err("文件已改变，请重新读取变化块".into());
+        }
         self.execute_with_env(
             &args,
             Some(patch.as_bytes()),

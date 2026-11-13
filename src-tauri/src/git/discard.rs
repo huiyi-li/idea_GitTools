@@ -289,6 +289,14 @@ impl Git {
         if self.preview_discard(request.paths, request.mode).await? != fresh {
             return Err("文件在备份期间发生变化，请重新获取预览".into());
         }
+        let expected_stamps = fresh
+            .files
+            .iter()
+            .map(|file| {
+                let path = checked_path(&self.root, &file.path)?;
+                Ok((file.path.clone(), super::merge::stamp(&path)?))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
         let indexed = entries(&self.bytes(&["ls-files", "--stage", "-z"]).await?)?;
         let restore: Vec<_> = fresh
             .files
@@ -297,6 +305,12 @@ impl Git {
             .map(|file| file.path.clone())
             .collect();
         let result = async {
+            for file in &fresh.files {
+                let path = checked_path(&self.root, &file.path)?;
+                if super::merge::stamp(&path)? != expected_stamps[&file.path] {
+                    return Err("文件在执行前发生变化，请重新获取预览".into());
+                }
+            }
             if !restore.is_empty() {
                 let mut args = vec!["--literal-pathspecs", "restore", "--worktree"];
                 let head = self.head().await?;
@@ -339,8 +353,12 @@ impl Git {
                 .checked()?;
             }
             for file in &fresh.files {
-                if file.delete {
-                    remove_file(&checked_path(&self.root, &file.path)?)?;
+                if file.delete && !restore.iter().any(|path| path == &file.path) {
+                    let path = checked_path(&self.root, &file.path)?;
+                    if super::merge::stamp(&path)? != expected_stamps[&file.path] {
+                        return Err("文件在删除前发生变化，请重新获取预览".into());
+                    }
+                    remove_file(&path)?;
                 }
             }
             if fresh.mode == DiscardMode::All && !restore.is_empty() {

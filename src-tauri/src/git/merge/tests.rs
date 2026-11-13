@@ -29,6 +29,25 @@ async fn conflict_at(path: &str) -> (TempDir, Git) {
 }
 
 #[tokio::test]
+async fn whole_side_resolution_replaces_an_existing_conflict_file() {
+    let (dir, mut git) = conflict().await;
+    let document = git.open_merge("conflict.txt".into()).await.unwrap();
+    git.save_merge(SaveMerge {
+        id: document.id,
+        choice: "right".into(),
+        finish: true,
+        progress: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("conflict.txt")).unwrap(),
+        "start\nfeature\nend\n"
+    );
+    assert!(git.merge_overview().await.unwrap().files.is_empty());
+}
+
+#[tokio::test]
 async fn whole_side_resolution_can_restore_a_removed_parent_directory() {
     let (dir, mut git) = conflict_at("nested/conflict.txt").await;
     fs::remove_file(dir.path().join("nested/conflict.txt")).unwrap();

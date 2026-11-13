@@ -508,6 +508,21 @@ impl Git {
         if paths.is_empty() || paths.len() > 10_000 {
             return Err("Select between 1 and 10,000 files.".into());
         }
+        let mut paths = paths;
+        if unstage {
+            for change in self.status().await?.changes {
+                if paths.iter().any(|path| path == &change.path) {
+                    if let Some(old_path) = change.old_path {
+                        paths.push(old_path);
+                    }
+                }
+            }
+            paths.sort_unstable();
+            paths.dedup();
+        }
+        if paths.len() > 10_000 {
+            return Err("Select between 1 and 10,000 files.".into());
+        }
         for path in &paths {
             validate_path(path)?;
         }

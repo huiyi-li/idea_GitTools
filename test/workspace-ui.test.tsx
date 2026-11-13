@@ -518,6 +518,32 @@ function switchingFixture(recent?: string[]) {
   return calls;
 }
 
+test('manual repository selection wins over a late startup repository result', async () => {
+  switchingFixture();
+  const backend = globalThis.testBackend;
+  let releaseInitial: ((path: string) => void) | undefined;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'initial_repository') {
+      return new Promise<string>(resolve => { releaseInitial = resolve; });
+    }
+    return backend(command, args);
+  };
+  (globalThis as any).testDialog = async () => 'C:/next';
+  try {
+    render(<App />, root);
+    await waitFor(() => releaseInitial);
+    button('选择仓库文件夹').click();
+    await waitFor(() => root.querySelector('.repository-picker')?.textContent?.includes('next'));
+    releaseInitial!('C:/fixture');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('next'));
+    assert.ok(root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
+  } finally {
+    render(null, root);
+    delete (globalThis as any).testDialog;
+  }
+});
+
 test('returning from the folder dialog switches repositories despite the window focus refresh', async () => {
   const calls = switchingFixture();
   const backend = globalThis.testBackend;
