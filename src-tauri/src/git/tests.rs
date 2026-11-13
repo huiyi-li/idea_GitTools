@@ -41,6 +41,7 @@ fn query() -> LogQuery {
         offset: 0,
         search: String::new(),
         branch: String::new(),
+        ..Default::default()
     }
 }
 

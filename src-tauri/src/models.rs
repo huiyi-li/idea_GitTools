@@ -45,7 +45,7 @@ pub struct Status {
     pub stashes: Vec<Stash>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogQuery {
     #[serde(default)]
@@ -54,6 +54,16 @@ pub struct LogQuery {
     pub search: String,
     #[serde(default)]
     pub branch: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub since: String,
+    #[serde(default)]
+    pub until: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub revision: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

@@ -26,6 +26,7 @@ import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
+import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
 import { RepositorySidebar } from './RepositorySidebar';
 import { ActionMenu, FileIcon, Icon, Modal, Split, ToolButton } from './ui/controls';
 import { HistoryDialog, historyLabels, type OperationPreview } from './HistoryDialog';
@@ -145,6 +146,8 @@ export function App() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [branch, setBranch] = useState('');
+  const [logFilters, setLogFilters] = useState<LogFilters>(EMPTY_FILTERS);
+  const [showLogFilters, setShowLogFilters] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [details, setDetails] = useState<Details | null>(null);
   const [loadingLog, setLoadingLog] = useState(false);
@@ -277,6 +280,8 @@ export function App() {
       setBranch('');
       setSearch('');
       setSearchInput('');
+      setLogFilters(EMPTY_FILTERS);
+      setShowLogFilters(false);
       setDialog(null);
       setOperationDialog(null);
       setDiscard(null);
@@ -467,7 +472,7 @@ export function App() {
     let current = true;
     if (!root || view !== 'log') return;
     setLoadingLog(true);
-    void call<LogPage>('read_log', { root, query: { offset, search, branch } })
+    void call<LogPage>('read_log', { root, query: { offset, search, branch, ...logFilters } })
       .then((next) => {
         if (!current || activeRoot.current !== root) return;
         setPage(next);
@@ -488,7 +493,7 @@ export function App() {
     return () => {
       current = false;
     };
-  }, [root, offset, search, branch, version, view]);
+  }, [root, offset, search, branch, logFilters, version, view]);
 
   useEffect(() => {
     let current = true;
@@ -852,7 +857,18 @@ export function App() {
                             />
                           )}
                         </span>
+                        <button aria-expanded={showLogFilters} onClick={() => setShowLogFilters(!showLogFilters)}>
+                          高级筛选{Object.values(logFilters).some(Boolean) ? ' · 已启用' : ''}
+                        </button>
                       </div>
+                      {showLogFilters && <LogFilterPanel key={root} root={root} filters={logFilters} search={searchInput} branch={branch}
+                        onApply={(filters, text, branch) => {
+                          setLogFilters(filters);
+                          setSearchInput(text);
+                          setSearch(text);
+                          setBranch(branch);
+                          setOffset(0);
+                        }} />}
                       {loadingLog ? (
                         <div class="empty">正在加载提交…</div>
                       ) : (

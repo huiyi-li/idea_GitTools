@@ -211,6 +211,7 @@ async fn checkout_backup_restores_index_layout_and_untracked_files() {
             offset: 0,
             search: String::new(),
             branch: String::new(),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -540,6 +541,7 @@ async fn reflog_and_recovery_branch_find_commits_after_reset() {
             offset: 0,
             search: String::new(),
             branch: String::new(),
+            ..Default::default()
         })
         .await
         .unwrap();

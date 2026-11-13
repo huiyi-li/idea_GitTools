@@ -12,6 +12,7 @@ pub(crate) mod file_history;
 pub(crate) mod history;
 pub(crate) mod hunks;
 pub(crate) mod interactive;
+mod log;
 pub(crate) mod management;
 pub(crate) mod merge;
 pub(crate) mod navigation;
@@ -349,54 +350,6 @@ impl Git {
             branches,
             stashes,
         })
-    }
-
-    pub async fn log(&self, query: LogQuery) -> Result<LogPage, String> {
-        if query.offset > 10_000_000 || query.search.len() > 4096 {
-            return Err("Log query is too large.".into());
-        }
-        if self.repository().await?.head.is_none() {
-            return Ok(LogPage {
-                commits: vec![],
-                has_more: false,
-            });
-        }
-        let format = format!("--format={LOG_FORMAT}");
-        let skip = format!("--skip={}", query.offset);
-        let count = format!("--max-count={}", PAGE_SIZE + 1);
-        let mut args = vec![
-            "log",
-            "--topo-order",
-            "--decorate=full",
-            "--decorate-refs-exclude=refs/ideagittool/*",
-            "--decorate-refs-exclude=refs/stash",
-            "-z",
-            &format,
-            &skip,
-            &count,
-        ];
-        let grep = format!("--grep={}", query.search);
-        if !query.search.is_empty() {
-            args.extend(["--fixed-strings", "--regexp-ignore-case", &grep]);
-        }
-        if query.branch.is_empty() {
-            args.extend(["--branches", "--remotes", "--tags", "HEAD"]);
-        } else {
-            self.bytes(&[
-                "rev-parse",
-                "--verify",
-                "--end-of-options",
-                &format!("{}^{{commit}}", query.branch),
-            ])
-            .await?;
-            args.extend(["--end-of-options", &query.branch]);
-        }
-        args.push("--");
-        let bytes = self.bytes(&args).await?;
-        let mut commits = parse_commits(&bytes)?;
-        let has_more = commits.len() > PAGE_SIZE;
-        commits.truncate(PAGE_SIZE);
-        Ok(LogPage { commits, has_more })
     }
 
     pub async fn details(&self, revision: &str) -> Result<CommitDetails, String> {

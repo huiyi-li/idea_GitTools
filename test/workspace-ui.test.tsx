@@ -254,6 +254,41 @@ function fixture(
   return calls;
 }
 
+test('advanced log filters combine conditions and save repository-specific presets', async () => {
+  const calls = fixture();
+  try {
+    await waitFor(() => root.querySelector('.commit-row'));
+    button('高级筛选').click();
+    await waitFor(() => root.querySelector('[aria-label="作者或邮箱"]'));
+    function input(label: string, value: string) {
+      const element = root.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+      element.value = value;
+      element.dispatchEvent(new window.Event('input', { bubbles: true }));
+    }
+    input('作者或邮箱', 'ming@example.test');
+    input('文件或目录路径', 'src/空 格 [x].ts');
+    input('开始日期', '2026-01-01');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    button('应用筛选').click();
+    await waitFor(() => calls.some(call => call.command === 'read_log' && call.args.query.author === 'ming@example.test'));
+    const query = calls.filter(call => call.command === 'read_log').at(-1)!.args.query;
+    assert.equal(query.path, 'src/空 格 [x].ts');
+    assert.equal(query.since, '2026-01-01');
+    assert.equal(query.offset, 0);
+    input('筛选名称', '我的修改');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    button('保存筛选').click();
+    await waitFor(() => root.querySelector('.saved-filters'));
+    assert.ok(localStorage.getItem('log.filters.C:/fixture')?.includes('我的修改'));
+    button('清除所有筛选').click();
+    await waitFor(() => calls.filter(call => call.command === 'read_log').at(-1)?.args.query.author === '');
+    button('我的修改').click();
+    await waitFor(() => calls.filter(call => call.command === 'read_log').at(-1)?.args.query.author === 'ming@example.test');
+    button('删除筛选 我的修改').click();
+    await waitFor(() => !root.querySelector('.saved-filters'));
+  } finally { render(null, root); }
+});
+
 test('log layout loads the diff through its normal entry point and filters branches', async () => {
   const calls = fixture();
   try {
