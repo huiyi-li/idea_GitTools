@@ -40,6 +40,7 @@ import { NavigationDialog } from './navigation/NavigationDialog';
 import { RecoveryDialog } from './navigation/RecoveryDialog';
 import { DiagnosticsDialog } from './DiagnosticsDialog';
 import { BisectDialog } from './BisectDialog';
+import { SubmoduleDialog } from './SubmoduleDialog';
 import type { NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, OperationRecord, RecoveryOverview } from './navigation/types';
 import './navigation/style.css';
 
@@ -179,6 +180,7 @@ export function App() {
   const [showConsole, setShowConsole] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showBisect, setShowBisect] = useState(false);
+  const [showSubmodules, setShowSubmodules] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
   const [showHosting, setShowHosting] = useState(false);
   const [showClone, setShowClone] = useState(false);
@@ -604,7 +606,7 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (showUpdates) return;
-      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
+      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -626,7 +628,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
 
   function changeView(next: View) {
     setView(next);
@@ -706,6 +708,7 @@ export function App() {
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
             <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
             <button onClick={() => setShowBisect(true)}>Bisect</button>
+            <button onClick={() => setShowSubmodules(true)}>Submodule 管理</button>
           </ActionMenu>
           <ToolButton
             icon="general/add"
@@ -1197,7 +1200,7 @@ export function App() {
         </button>
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
-            (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || branchDialog || showWorktrees || ignorePath !== null ||
+            (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
               transfer || hunks || showAmend || showInteractive || fileHistory || mergePath !== null || review ||
               dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
@@ -1224,6 +1227,7 @@ export function App() {
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
       {showDiagnostics && root && <DiagnosticsDialog key={root} root={root} onClose={() => setShowDiagnostics(false)} />}
       {showBisect && root && <BisectDialog key={root} root={root} onClose={() => setShowBisect(false)} onChanged={() => refresh(root, true)} />}
+      {showSubmodules && root && <SubmoduleDialog key={root} root={root} onClose={() => setShowSubmodules(false)} onChanged={() => refresh(root, true)} />}
       {showManager && root && <RepositoryManager key={`${root}-${managerTab}-${managerStash?.reference ?? ''}-${managerStash?.hash ?? ''}`} root={root}
         initialTab={managerTab} initialStash={managerStash} version={version} onClose={() => setShowManager(false)} onChanged={openConflicts => refresh(root, openConflicts)} />}
       {branchDialog && root && <BranchDialog key={`${root}-${branchDialog.branch.full}-${branchDialog.action}`} root={root} initialBranch={branchDialog.branch} action={branchDialog.action}

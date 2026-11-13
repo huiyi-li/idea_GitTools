@@ -78,6 +78,16 @@ async fn git_diagnostics(root: String, state: State<'_, AppState>) -> Result<Dia
 }
 
 #[tauri::command]
+async fn submodules(root: String, state: State<'_, AppState>) -> Result<Vec<SubmoduleStatus>, String> {
+    active(&*state.0.lock().await, &root)?.submodules().await
+}
+
+#[tauri::command]
+async fn update_submodules(root: String, paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.update_submodules(paths).await
+}
+
+#[tauri::command]
 async fn bisect_status(root: String, state: State<'_, AppState>) -> Result<BisectStatus, String> {
     active(&*state.0.lock().await, &root)?.bisect_status().await
 }
@@ -829,6 +839,8 @@ pub fn run() {
             open_repository,
             repository_status,
             git_diagnostics,
+            submodules,
+            update_submodules,
             bisect_status,
             bisect_start,
             bisect_step,

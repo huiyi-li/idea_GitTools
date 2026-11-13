@@ -38,6 +38,7 @@ after(() => window.happyDOM.close());
 const { App } = await import('../src/App');
 const { DiagnosticsDialog } = await import('../src/DiagnosticsDialog');
 const { BisectDialog } = await import('../src/BisectDialog');
+const { SubmoduleDialog } = await import('../src/SubmoduleDialog');
 const { Split } = await import('../src/ui/controls');
 const root = document.body.appendChild(document.createElement('div'));
 
@@ -311,6 +312,26 @@ test('Git diagnostics shows read-only repository state', async () => {
     assert.ok(calls.some(call => call.command === 'git_diagnostics'), `diagnostics call missing: ${calls.map(call => call.command).join(',')}`);
     assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('git version 2.53.0'));
     assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('origin'));
+  } finally { render(null, root); }
+});
+
+test('Submodule view shows status and updates the selected path', async () => {
+  const calls = fixture();
+  globalThis.testBackend = async (command: string, args: any) => {
+    calls.push({ command, args: structuredClone(args) });
+    if (command === 'submodules') return [{ path: 'libs/core', commit: 'a'.repeat(40), state: '正常', detail: '(heads/main)' }];
+    if (command === 'update_submodules') return '';
+    throw new Error(command);
+  };
+  try {
+    render(<SubmoduleDialog root="C:/fixture" onClose={() => {}} onChanged={async () => {}} />, root);
+    await waitFor(() => document.querySelector('.submodule-row'));
+    const checkbox = document.querySelector<HTMLInputElement>('.submodule-row input[type="checkbox"]')!;
+    checkbox.click();
+    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>('button')].some(item => item.textContent?.trim() === '更新选中 (1)'));
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === '更新选中 (1)')!.click();
+    await waitFor(() => calls.some(call => call.command === 'update_submodules'));
+    assert.deepEqual(calls.find(call => call.command === 'update_submodules')!.args.paths, ['libs/core']);
   } finally { render(null, root); }
 });
 

@@ -48,7 +48,7 @@ NOTICE
 - 三栏合并管理器、冲突文件列表、逐块接受一侧或保留双方、手动编辑、自动处理简单冲突、同步滚动、冲突导航与撤销重做。
 - 合并进度保存与恢复、完成后暂存、继续或中止 merge / rebase / cherry-pick / revert。
 - 分支比较、Merge（自动 / --no-ff / --ff-only）、Rebase，以及日志提交的 Cherry-pick / Revert。冲突自动打开三栏合并管理器，支持继续、中止和跳过当前提交。
-- Git 诊断与 Bisect：查看 Git 版本、仓库状态、Remote 名称、Worktree 数量和安全配置，开始 Bisect 并标记 Good、Bad 或 Skip。
+- Git 诊断、Bisect 和 Submodule 管理：查看 Git 版本、仓库状态、Remote 名称、Worktree 数量和安全配置，开始 Bisect 并标记 Good、Bad 或 Skip，查看 Submodule 状态并初始化更新。
 - 工作区沿用原插件的紧凑工具栏、分组分支树和图标。日志页的分支、详情和底部 diff 可拖动调整，提交页采用左侧文件与提交说明、右侧 diff。面板尺寸自动保存，双击分隔条复位，Ctrl+L 聚焦日志搜索。
 
 Shelf、Changelist、Local History、AI 提交说明和多仓库同步操作仍需迁移。

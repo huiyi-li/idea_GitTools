@@ -171,6 +171,14 @@ async fn unstage_selected_rename_clears_both_index_paths() {
 }
 
 #[tokio::test]
+async fn submodule_status_is_empty_for_plain_repositories_and_rejects_unsafe_paths() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    assert!(git.submodules().await.unwrap().is_empty());
+    assert!(git.update_submodules(vec!["../outside".into()]).await.is_err());
+}
+
+#[tokio::test]
 async fn bisect_can_start_report_and_reset_without_leaking_remote_data() {
     let dir = fixture();
     let git = open(&dir).await;

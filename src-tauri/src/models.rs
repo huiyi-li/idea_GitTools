@@ -47,6 +47,14 @@ pub struct Status {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubmoduleStatus {
+    pub path: String,
+    pub commit: String,
+    pub state: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct BisectStatus {
     pub active: bool,
     pub start: Option<String>,

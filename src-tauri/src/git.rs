@@ -263,6 +263,49 @@ impl Git {
         Ok((head.code == 0).then(|| String::from_utf8_lossy(&head.stdout).trim().to_owned()))
     }
 
+    pub async fn submodules(&self) -> Result<Vec<SubmoduleStatus>, String> {
+        let output = self
+            .execute(&["submodule", "status", "--recursive"], None)
+            .await?
+            .checked()?;
+        let text = String::from_utf8(output).map_err(|_| "Submodule 状态不是 UTF-8 文本")?;
+        Ok(text
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim_start();
+                let mut fields = line.splitn(3, char::is_whitespace);
+                let raw = fields.next()?.trim();
+                if raw.is_empty() {
+                    return None;
+                }
+                let (state, commit) = match raw.chars().next()? {
+                    '-' => ("未初始化", raw[1..].to_owned()),
+                    '+' => ("已修改", raw[1..].to_owned()),
+                    'U' => ("冲突", raw[1..].to_owned()),
+                    _ => ("正常", raw.to_owned()),
+                };
+                let rest = fields.next()?.trim_start();
+                let mut path_and_detail = rest.splitn(2, char::is_whitespace);
+                let path = path_and_detail.next()?.to_owned();
+                let detail = path_and_detail.next().unwrap_or_default().trim().to_owned();
+                Some(SubmoduleStatus { path, commit, state: state.into(), detail })
+            })
+            .collect())
+    }
+
+    pub async fn update_submodules(&self, paths: Vec<String>) -> Result<(), String> {
+        if paths.len() > 1000 {
+            return Err("Submodule 路径过多".into());
+        }
+        for path in &paths {
+            validate_path(path)?;
+        }
+        let mut args = vec!["submodule", "update", "--init", "--recursive", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        self.bytes(&args).await?;
+        Ok(())
+    }
+
     pub async fn bisect_status(&self) -> Result<BisectStatus, String> {
         let git_dir = PathBuf::from(
             self.text(&["rev-parse", "--absolute-git-dir"])

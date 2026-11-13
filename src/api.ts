@@ -32,6 +32,13 @@ export interface Status {
   stashes: { reference: string; hash: string; message: string }[];
 }
 
+export interface SubmoduleStatus {
+  path: string;
+  commit: string;
+  state: string;
+  detail: string;
+}
+
 export interface Diagnostics {
   gitVersion: string;
   root: string;

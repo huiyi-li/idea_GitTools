@@ -95,6 +95,31 @@ input[type='checkbox'] {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.submodule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.submodule-row {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(120px, 1fr) minmax(0, 1.5fr);
+  gap: 8px;
+  align-items: center;
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.submodule-row:hover {
+  background: var(--bg-action-hover);
+}
+
+.submodule-state {
+  color: var(--fg-info);
+}
 .mono {
   font-family: Consolas, 'Courier New', monospace;
 }
