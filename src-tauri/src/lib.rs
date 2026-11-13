@@ -218,7 +218,7 @@ async fn multi_repository_history_action(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let guard = state.0.lock().await;
-    let git = active(&*guard, &root)?;
+    let git = active(&guard, &root)?;
     match action.as_str() {
         "drop" => {
             let details = git.details(&revision).await?;
