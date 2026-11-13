@@ -520,6 +520,28 @@ export function App() {
     });
   }
 
+  async function copyCommitRevision() {
+    if (!commitContext) return;
+    try {
+      await navigator.clipboard.writeText(commitContext.commit.hash);
+      setNotice('已复制提交 Revision');
+    } catch (error) {
+      setError(`复制 Revision 失败。${String(error)}`);
+    }
+    setCommitContext(null);
+  }
+
+  async function copyCommitPatch() {
+    if (!commitContext || !root) return;
+    const commit = commitContext.commit;
+    await perform('生成 Patch', async () => {
+      const patch = await call<string>('create_patch', { root, revision: commit.hash });
+      await navigator.clipboard.writeText(patch);
+      setNotice(`已复制 ${commit.hash.slice(0, 8)} 的 Patch`);
+      setCommitContext(null);
+    });
+  }
+
   function previewHistory(
     action: HistoryAction,
     target: { target: string; hash: string; label: string; parents?: string[] },
@@ -1432,6 +1454,9 @@ export function App() {
         />
       )}
       {commitContext && <div class="action-popup commit-context-menu" role="menu" style={{ left: Math.max(8, Math.min(commitContext.x, window.innerWidth - 290)), top: Math.max(8, Math.min(commitContext.y, window.innerHeight - 150)) }}>
+        <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitRevision()}>复制 Revision Number</button>
+        <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitPatch()}>创建 Patch 并复制</button>
+        <hr />
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
         <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>

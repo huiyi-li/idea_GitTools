@@ -810,6 +810,15 @@ impl Git {
         Ok(format!("{}{}", action, detail))
     }
 
+    pub async fn create_patch(&self, revision: &str) -> Result<String, String> {
+        validate_hash(revision)?;
+        let output = self
+            .execute(&["format-patch", "-1", "--stdout", "--binary", "--full-index", revision], None)
+            .await?
+            .checked()?;
+        String::from_utf8(output).map_err(|_| "Patch 不是 UTF-8 文本".into())
+    }
+
     pub async fn checkout(&self, name: &str) -> Result<(), String> {
         let status = self.status().await?;
         let branch = status
