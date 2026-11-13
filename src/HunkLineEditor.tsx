@@ -66,7 +66,7 @@ export function HunkLineEditor({ text, selected, disabled, onToggle, onSelect }:
         '&': { height: '320px', fontSize: '12px', backgroundColor: 'var(--bg-editor)', color: 'var(--fg)' },
         '.cm-scroller': { overflow: 'auto', fontFamily: 'Consolas, monospace' },
         '.cm-gutters': { backgroundColor: 'var(--bg)', color: 'var(--fg-secondary)', borderRight: '1px solid var(--border)' },
-        '.cm-hunk-checkboxes .cm-gutterElement': { padding: '0 5px' },
+        '.hunk-checkboxes .cm-gutterElement': { padding: '0 5px' },
         '.cm-line': { padding: '0 8px' },
       }),
     ] });

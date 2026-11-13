@@ -11,6 +11,7 @@ pub(crate) mod discard;
 pub(crate) mod file_history;
 pub(crate) mod history;
 pub(crate) mod hunks;
+pub(crate) mod ignore;
 pub(crate) mod interactive;
 mod log;
 pub(crate) mod management;

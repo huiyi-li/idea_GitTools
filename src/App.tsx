@@ -22,6 +22,7 @@ import { CloneDialog } from './TransportDialog';
 import { RemoteDialog, TransferDialog } from './RemoteDialog';
 import { RepositoryManager } from './RepositoryManager';
 import { WorktreeDialog } from './WorktreeDialog';
+import { IgnoreDialog } from './IgnoreDialog';
 import { HunkDialog, AmendDialog } from './HunkDialog';
 import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
@@ -52,6 +53,7 @@ function ChangeList({
   onStage,
   onHunks,
   onDiscard,
+  onIgnore,
   unstage,
   busy,
 }: {
@@ -62,6 +64,7 @@ function ChangeList({
   onStage?: (changes: Change[], unstage: boolean) => void;
   onHunks?: (change: Change, area: 'staged' | 'unstaged') => void;
   onDiscard?: (changes: Change[], mode: DiscardMode) => void;
+  onIgnore?: (path: string) => void;
   unstage?: boolean;
   busy: boolean;
 }) {
@@ -119,6 +122,7 @@ function ChangeList({
                 </button>
               )}
               <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
+              {onIgnore && <button onClick={() => onIgnore(change.path)}>忽略规则／停止跟踪…</button>}
             </ActionMenu>
           )}
         </div>
@@ -173,6 +177,7 @@ export function App() {
   const [showRemotes, setShowRemotes] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [showWorktrees, setShowWorktrees] = useState(false);
+  const [ignorePath, setIgnorePath] = useState<string | null>(null);
   const [hunks, setHunks] = useState<{ path: string; area: 'staged' | 'unstaged' } | null>(null);
   const [showAmend, setShowAmend] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
@@ -299,6 +304,8 @@ export function App() {
       setComparisonBranch(null);
       setMergePath(null);
       setShowHosting(false);
+      setShowWorktrees(false);
+      setIgnorePath(null);
       setReview(null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
@@ -564,7 +571,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (showHosting || showClone || showRemotes || showManager || transfer || hunks || showAmend || showInteractive || fileHistory) return;
+      if (showHosting || showClone || showRemotes || showManager || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -586,7 +593,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
 
   function changeView(next: View) {
     setView(next);
@@ -660,6 +667,7 @@ export function App() {
             <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
             <button onClick={() => setShowManager(true)}>分支、标签与 Stash</button>
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
+            <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
           </ActionMenu>
@@ -1055,6 +1063,7 @@ export function App() {
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
+                        onIgnore={setIgnorePath}
                         busy={!!busy}
                       />
                     </details>
@@ -1081,6 +1090,7 @@ export function App() {
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
+                        onIgnore={setIgnorePath}
                         unstage
                         busy={!!busy}
                       />
@@ -1146,6 +1156,7 @@ export function App() {
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
       {showManager && root && <RepositoryManager key={root} root={root} onClose={() => setShowManager(false)} onChanged={() => refresh(root, true)} />}
       {showWorktrees && root && <WorktreeDialog key={root} root={root} onClose={() => setShowWorktrees(false)} onChanged={() => refresh(root)} onOpen={path => openPath(path, true)} />}
+      {ignorePath !== null && root && <IgnoreDialog key={root} root={root} initialPath={ignorePath} onClose={() => setIgnorePath(null)} onChanged={() => refresh(root)} />}
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
       {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}

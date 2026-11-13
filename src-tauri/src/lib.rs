@@ -497,6 +497,43 @@ async fn read_worktrees(
 }
 
 #[tauri::command]
+async fn read_ignore(
+    root: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<git::ignore::IgnoreState, String> {
+    active(&*state.0.lock().await, &root)?
+        .read_ignore(&path)
+        .await
+}
+
+#[tauri::command]
+async fn ignore_files(
+    root: String,
+    kind: String,
+    query: String,
+    offset: usize,
+    state: State<'_, AppState>,
+) -> Result<git::ignore::IgnoreFiles, String> {
+    active(&*state.0.lock().await, &root)?
+        .ignore_files(&kind, &query, offset)
+        .await
+}
+
+#[tauri::command]
+async fn edit_ignore(
+    root: String,
+    preview: git::ignore::IgnoreState,
+    action: String,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_ignore(preview, &action, &value)
+        .await
+}
+
+#[tauri::command]
 async fn create_worktree(
     root: String,
     request: git::worktrees::CreateWorktree,
@@ -708,6 +745,9 @@ pub fn run() {
             delete_remote_ref,
             preview_hunks,
             read_worktrees,
+            read_ignore,
+            ignore_files,
+            edit_ignore,
             create_worktree,
             edit_worktree,
             prune_worktrees,

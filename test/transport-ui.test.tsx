@@ -112,6 +112,7 @@ test('URL clone infers a folder, requires no hosting account and opens the compl
 const { RemoteDialog, TransferDialog } = await import('../src/RemoteDialog');
 const { RepositoryManager } = await import('../src/RepositoryManager');
 const { WorktreeDialog } = await import('../src/WorktreeDialog');
+const { IgnoreDialog, ignorePattern } = await import('../src/IgnoreDialog');
 const { HunkDialog, AmendDialog } = await import('../src/HunkDialog');
 const { InteractiveRebase, autosquash } = await import('../src/InteractiveRebase');
 const { FileHistoryDialog } = await import('../src/FileHistoryDialog');
@@ -351,6 +352,43 @@ test('hunk staging uses the reviewed preview and reports a clean file after the 
   } finally {
     render(null, host);
   }
+});
+
+test('ignore rules escape literal filenames, explain sources and confirm stopping tracking', async () => {
+  assert.equal(ignorePattern('dir/a [x]#!.exe', 'path'), '/dir/a\\ \\[x\\]\\#\\!.exe');
+  assert.equal(ignorePattern('dir/a.exe', 'extension'), '*.exe');
+  assert.equal(ignorePattern('dir/a.exe', 'parent'), '/dir/');
+  let tracked = true;
+  const writes: any[] = [];
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'read_ignore') return { path: args.path, content: '*.exe\n', fingerprint: 'ignore-snapshot', fileStamp: 'stamp',
+      matches: [{ source: '.gitignore', line: 1, pattern: '*.exe', negated: false }], trackedCount: tracked ? 1 : 0,
+      trackedPaths: tracked ? ['app.exe'] : [], directory: false };
+    if (command === 'ignore_files') return { paths: ['app.exe'], total: 1, hasMore: false };
+    if (command === 'edit_ignore') { writes.push(args); if (args.action === 'untrack') tracked = false; return; }
+    throw Error(command);
+  };
+  render(<IgnoreDialog root="C:/repo" initialPath="app.exe" onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.textContent?.includes('.gitignore 第 1 行'));
+    assert.equal((host.querySelector('[aria-label="忽略规则"]') as HTMLInputElement).value, '/app.exe');
+    button('添加忽略规则').click();
+    await waitFor(() => writes.length === 1);
+    assert.equal(writes[0].value, '/app.exe');
+    assert.equal(writes[0].preview.fingerprint, 'ignore-snapshot');
+    await waitFor(() => !button('停止跟踪并保留文件…').disabled);
+    button('停止跟踪并保留文件…').click();
+    await waitFor(() => host.querySelector('[aria-label="确认停止跟踪"]'));
+    assert.equal(writes.length, 1);
+    button('确认停止跟踪').click();
+    await waitFor(() => writes.length === 2);
+    assert.equal(writes[1].action, 'untrack');
+    await waitFor(() => host.textContent?.includes('已停止跟踪 1 个文件'));
+    const toggle = host.querySelector<HTMLInputElement>('[aria-label="显示忽略文件"]')!;
+    toggle.checked = false;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => host.querySelector('[aria-label="已跟踪文件列表"]'));
+  } finally { render(null, host); }
 });
 
 test('selected diff lines use the pinned preview and require confirmation before discarding', async () => {

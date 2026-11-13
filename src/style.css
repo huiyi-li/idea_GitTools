@@ -1187,7 +1187,7 @@ input[type='checkbox'] {
   }
 }
 .transport-form { display: grid; gap: 12px; }
-.log-filter-panel { padding: 10px 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border); }
+.log-filter-panel { padding: 10px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
 .log-filter-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .log-filter-fields label { display: grid; gap: 5px; color: var(--fg-info); font-size: 12px; }
 .log-filter-fields input, .filter-actions input { min-width: 0; width: 100%; }
@@ -1203,6 +1203,17 @@ input[type='checkbox'] {
 .worktree-create summary { padding: 8px 0; cursor: pointer; }
 .confirmation { border: 1px solid var(--border); padding: 12px; margin-top: 12px; }
 .confirmation button { margin-right: 8px; }
+.ignore-path-form, .ignore-pattern-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+.ignore-path-form label, .ignore-pattern-form label { flex: 1; min-width: 180px; }
+.ignore-reason { padding: 0 10px; border-left: 2px solid var(--border); }
+.ignore-rules { margin: 16px 0; }
+.ignore-rules summary { cursor: pointer; }
+.ignore-rules pre { max-height: 160px; overflow: auto; }
+.ignore-rules-editor { display: grid; gap: 8px; }
+.ignore-rules-editor textarea { width: 100%; font-family: Consolas, monospace; }
+.ignore-file-list { display: grid; max-height: 200px; overflow: auto; margin-top: 8px; }
+.ignore-file-list button { text-align: left; padding: 5px 8px; border-radius: 0; overflow-wrap: anywhere; }
+.ignore-file-list button.selected { background: var(--bg-selection); }
 .transport-form label, .transport-auth label { display: grid; gap: 6px; }
 .transport-log { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg-editor); }
 .transport-auth { padding: 12px; border: 1px solid var(--border); }
