@@ -58,7 +58,7 @@ export function MultiRepositoryDialog({ currentRoot, onClose }: { currentRoot: s
     setBusy(true);
     setError('');
     try {
-      const query = { offset: 0, search: '', branch: '', author: '', since: '', until: '', path: '', revision: '', merge: 'all' };
+      const query = { offset: 0, search: '', branch: '', author: '', since: '', until: '', path: '', revision: '', merge: 'all', firstParent: false };
       setCommits(await call<MultiCommit[]>('multi_repository_log', { roots, query }));
     } catch (e) {
       setError(String(e));

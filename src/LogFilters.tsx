@@ -8,8 +8,9 @@ export interface LogFilters {
   path: string;
   revision: string;
   merge: 'all' | 'merges' | 'non-merges';
+  firstParent: boolean;
 }
-export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '', merge: 'all' };
+export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '', merge: 'all', firstParent: false };
 interface SavedFilter extends LogFilters {
   name: string;
   search: string;
@@ -29,8 +30,25 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
   const [saved, setSaved] = useState<SavedFilter[]>(() => {
     const value = readSaved<unknown>(`log.filters.${root}`, []);
     if (!Array.isArray(value)) return [];
-    return value.filter((item): item is SavedFilter => item &&
-      ['name', 'search', 'branch', ...Object.keys(EMPTY_FILTERS)].every(key => typeof item[key] === 'string')).slice(0, 20);
+    return value.flatMap((item): SavedFilter[] => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      if (typeof record.name !== 'string' || typeof record.search !== 'string' || typeof record.branch !== 'string') return [];
+      if (typeof record.author !== 'string' || typeof record.since !== 'string' || typeof record.until !== 'string' ||
+        typeof record.path !== 'string' || typeof record.revision !== 'string') return [];
+      return [{
+        name: record.name,
+        search: record.search,
+        branch: record.branch,
+        author: record.author,
+        since: record.since,
+        until: record.until,
+        path: record.path,
+        revision: record.revision,
+        merge: record.merge === 'merges' || record.merge === 'non-merges' ? record.merge : 'all',
+        firstParent: record.firstParent === true,
+      }];
+    }).slice(0, 20);
   });
   function persist(next: SavedFilter[]) {
     try {
@@ -58,6 +76,7 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
         <label>提交类型<select aria-label="提交类型" value={draft.merge} onChange={event => setDraft(previous => ({ ...previous, merge: event.currentTarget.value as LogFilters['merge'] }))}>
           <option value="all">全部提交</option><option value="merges">仅合并提交</option><option value="non-merges">排除合并提交</option>
         </select></label>
+        <label class="checkbox-field"><input type="checkbox" checked={draft.firstParent} onChange={event => setDraft(previous => ({ ...previous, firstParent: event.currentTarget.checked }))} />只显示第一父提交路径</label>
       </div>
       <div class="filter-actions">
         <button type="submit">应用筛选</button>
@@ -70,7 +89,7 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
     </form>
     {!!saved.length && <div class="saved-filters" aria-label="已保存筛选">{saved.map(item => <span key={item.name}>
       <button onClick={() => {
-        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision, merge: item.merge };
+        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision, merge: item.merge, firstParent: item.firstParent };
         setDraft(filters);
         onApply(filters, item.search, item.branch);
       }}>{item.name}</button>

@@ -106,6 +106,9 @@ impl Git {
             "non-merges" => args.push("--no-merges".into()),
             _ => {}
         }
+        if query.first_parent {
+            args.push("--first-parent".into());
+        }
         for (option, value) in [("--grep", &query.search), ("--author", &query.author)] {
             if !value.is_empty() {
                 args.push(format!("{option}={value}"));

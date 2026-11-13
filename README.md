@@ -52,7 +52,7 @@ NOTICE
 - Git 诊断、Bisect 和 Submodule 管理：查看 Git 版本、仓库状态、Remote 名称、Worktree 数量和安全配置，开始 Bisect 并标记 Good、Bad 或 Skip，查看 Submodule 状态并初始化更新。
 - 工作区沿用原插件的紧凑工具栏、分组分支树和图标。日志页的分支、详情和底部 diff 可拖动调整，提交页采用左侧文件与提交说明、右侧 diff。面板尺寸自动保存，双击分隔条复位，Ctrl+L 聚焦日志搜索。
 
-Shelf、Changelist、Local History、AI 提交说明和多仓库同步操作仍需迁移。
+Shelf、Changelist、Local History、AI 提交说明、多仓库同步、分支收藏、提交类型筛选和 Push 高级选项已迁移。AI 提交说明当前使用本地规则生成，Shelf 基于 Git stash 保存。
 
 ## 本地文件更改
 
