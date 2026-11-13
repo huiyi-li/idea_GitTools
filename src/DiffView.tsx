@@ -1,21 +1,25 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Compartment, EditorState, Text } from '@codemirror/state';
-import { EditorView, lineNumbers } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { keymap } from '@codemirror/view';
-import { call, type DiffTarget, type FileDiff } from './api';
+import { call, readSaved, save, type BlameLine, type DiffTarget, type FileDiff } from './api';
 import { MergeAnalysis } from './merge/analysis-client';
 import type { PreparedDiff } from './merge/analysis';
 import { useMinimapPreference } from './ui/editor-preferences';
 import { codeMinimap, minimapRanges, type MinimapRange } from './ui/minimap';
 import { diffLineHighlights } from './ui/diff-highlights';
 
-export function DiffEditors({ data, labels, onLineSelect }: {
+export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onToggleBlame }: {
   data: PreparedDiff;
   labels?: [string, string];
   onLineSelect?: (line: number, side: 'LEFT' | 'RIGHT') => void;
+  blame?: BlameLine[];
+  showBlame?: boolean;
+  onToggleBlame?: (enabled: boolean) => void;
 }) {
   const selection = useRef(onLineSelect);
+  const inlineBlame = showBlame === true;
   selection.current = onLineSelect;
   const left = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
@@ -53,6 +57,25 @@ export function DiffEditors({ data, labels, onLineSelect }: {
       },
       { dark: document.body.classList.contains('ij-dark') },
     );
+    class BlameWidget extends WidgetType {
+      constructor(private readonly line: BlameLine) { super(); }
+      toDOM() {
+        const element = document.createElement('span');
+        element.className = 'cm-inline-blame';
+        element.textContent = `${this.line.author} · ${new Date(this.line.time * 1000).toLocaleDateString('zh-CN')} · ${this.line.summary}`;
+        element.title = `${this.line.hash} · ${this.line.path}`;
+        return element;
+      }
+      ignoreEvent() { return true; }
+    }
+    const blameDecorations = (side: 'before' | 'after') => {
+      const lines = side === 'after' ? blame ?? [] : [];
+      return Decoration.set(lines.flatMap((line) => {
+        const number = line.line;
+        if (number < 1 || number > (side === 'after' ? after.lines : before.lines)) return [];
+        return [Decoration.widget({ widget: new BlameWidget(line), side: 1 }).range((side === 'after' ? after : before).line(number).to)] as const;
+      }));
+    };
     const extensions = [
       lineNumbers(),
       keymap.of(defaultKeymap),
@@ -73,6 +96,7 @@ export function DiffEditors({ data, labels, onLineSelect }: {
       doc: before,
       extensions: [
         ...extensions,
+        EditorView.decorations.of(blameDecorations('before')),
         minimapRanges.init(() => ranges('before')),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet) {
@@ -86,6 +110,7 @@ export function DiffEditors({ data, labels, onLineSelect }: {
       doc: after,
       extensions: [
         ...extensions,
+        EditorView.decorations.of(blameDecorations('after')),
         minimapRanges.init(() => ranges('after')),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet) {
@@ -172,6 +197,10 @@ export function DiffEditors({ data, labels, onLineSelect }: {
           <input type="checkbox" checked={sync} onChange={(e) => setSync(e.currentTarget.checked)} />
           同步滚动
         </label>
+        <label title="只读取当前文件的前 200 行 blame，自动保存设置">
+          <input type="checkbox" checked={inlineBlame} onChange={(event) => onToggleBlame?.(event.currentTarget.checked)} />
+          Inline Blame
+        </label>
         <label title="同时应用于文件 diff 和三栏合并，自动保存设置">
           <input
             type="checkbox"
@@ -247,6 +276,8 @@ export function DiffView({
   const [phase, setPhase] = useState('');
   const [allowedKey, setAllowedKey] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [showBlame, setShowBlame] = useState(() => readSaved<boolean>('diff.inlineBlame', false) === true);
+  const [blame, setBlame] = useState<BlameLine[]>([]);
   const allowLarge = allowedKey === key;
   useEffect(
     () => () => {
@@ -256,6 +287,20 @@ export function DiffView({
     },
     [root],
   );
+
+  useEffect(() => {
+    save('diff.inlineBlame', showBlame);
+  }, [showBlame]);
+
+  useEffect(() => {
+    let current = true;
+    setBlame([]);
+    if (!showBlame || !target || !target.path) return;
+    void call<{ lines: BlameLine[] }>('file_blame', { root, path: target.path, revision: target.revision, offset: 0 })
+      .then((value) => { if (current) setBlame(value.lines); })
+      .catch(() => { if (current) setBlame([]); });
+    return () => { current = false; };
+  }, [root, key, showBlame, target?.path, target?.revision]);
 
   useEffect(() => {
     let current = true;
@@ -370,6 +415,9 @@ export function DiffView({
           target?.area === 'staged' ? ['HEAD', '暂存区'] :
           target?.area === 'unstaged' ? ['暂存区', '工作区'] : undefined
         )}
+          blame={blame}
+          showBlame={showBlame}
+          onToggleBlame={setShowBlame}
       />
     );
 

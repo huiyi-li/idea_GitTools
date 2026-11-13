@@ -134,6 +134,17 @@ export interface LocalHistorySnapshot {
   content: string;
 }
 
+export interface BlameLine {
+  hash: string;
+  originalLine: number;
+  line: number;
+  author: string;
+  time: number;
+  summary: string;
+  path: string;
+  text: string;
+}
+
 export function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   return invoke<T>(command, args);
 }

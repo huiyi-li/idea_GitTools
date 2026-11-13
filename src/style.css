@@ -1286,6 +1286,15 @@ input[type='checkbox'] {
 .blame-table { border-collapse: collapse; width: 100%; }
 .blame-table td { padding: 2px 8px; vertical-align: top; white-space: nowrap; }
 .blame-table pre { margin: 0; }
+.cm-inline-blame {
+  margin-left: 18px;
+  color: var(--fg-secondary);
+  opacity: 0.72;
+  font-style: italic;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .modal.transport-dialog, .modal.workflow-dialog {
   max-height: calc(100vh - 48px);
   overflow-y: auto;
