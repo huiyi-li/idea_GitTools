@@ -58,6 +58,7 @@ try {
               export const invoke = (command, args) => globalThis.testBackend(command, args);
               export const listen = async () => () => {};
               export const open = async (...args) => globalThis.testDialog ? globalThis.testDialog(...args) : null;
+              export const save = async (...args) => globalThis.testDialog ? globalThis.testDialog(...args) : null;
               export const check = (...args) => globalThis.testUpdater(...args);
               export const getCurrentWindow = () => ({ onCloseRequested: async () => () => {}, close: async () => {} });
             `,

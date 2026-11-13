@@ -1466,6 +1466,39 @@ export function App() {
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
         <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>
+        <hr />
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => {
+            const commit = commitContext.commit;
+            setCommitContext(null);
+            previewHistory('cherry-pick', {
+              target: commit.hash,
+              hash: commit.hash,
+              label: commit.subject,
+              parents: commit.parents,
+            });
+          }}
+        >
+          Cherry-pick…
+        </button>
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => {
+            const commit = commitContext.commit;
+            setCommitContext(null);
+            previewHistory('revert', {
+              target: commit.hash,
+              hash: commit.hash,
+              label: commit.subject,
+              parents: commit.parents,
+            });
+          }}
+        >
+          Revert…
+        </button>
       </div>}
       {discard && <DiscardDialog preview={discard} busy={!!busy} error={discardError}
         onClose={() => setDiscard(null)} onConfirm={() => void discardChanges()}
