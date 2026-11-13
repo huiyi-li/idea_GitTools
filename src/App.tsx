@@ -21,6 +21,7 @@ import { DiffView } from './DiffView';
 import { CloneDialog } from './TransportDialog';
 import { RemoteDialog, TransferDialog } from './RemoteDialog';
 import { RepositoryManager } from './RepositoryManager';
+import { WorktreeDialog } from './WorktreeDialog';
 import { HunkDialog, AmendDialog } from './HunkDialog';
 import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
@@ -171,6 +172,7 @@ export function App() {
   const [showClone, setShowClone] = useState(false);
   const [showRemotes, setShowRemotes] = useState(false);
   const [showManager, setShowManager] = useState(false);
+  const [showWorktrees, setShowWorktrees] = useState(false);
   const [hunks, setHunks] = useState<{ path: string; area: 'staged' | 'unstaged' } | null>(null);
   const [showAmend, setShowAmend] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
@@ -657,6 +659,7 @@ export function App() {
           <ActionMenu label="仓库工具" text="仓库" disabled={!root || !!busy}>
             <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
             <button onClick={() => setShowManager(true)}>分支、标签与 Stash</button>
+            <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
           </ActionMenu>
@@ -1142,6 +1145,7 @@ export function App() {
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
       {showManager && root && <RepositoryManager key={root} root={root} onClose={() => setShowManager(false)} onChanged={() => refresh(root, true)} />}
+      {showWorktrees && root && <WorktreeDialog key={root} root={root} onClose={() => setShowWorktrees(false)} onChanged={() => refresh(root)} onOpen={path => openPath(path, true)} />}
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
       {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}

@@ -111,10 +111,50 @@ test('URL clone infers a folder, requires no hosting account and opens the compl
 
 const { RemoteDialog, TransferDialog } = await import('../src/RemoteDialog');
 const { RepositoryManager } = await import('../src/RepositoryManager');
+const { WorktreeDialog } = await import('../src/WorktreeDialog');
 const { HunkDialog, AmendDialog } = await import('../src/HunkDialog');
 const { InteractiveRebase, autosquash } = await import('../src/InteractiveRebase');
 const { FileHistoryDialog } = await import('../src/FileHistoryDialog');
 const { ReviewActions, ReviewThreads } = await import('../src/hosting/ReviewActions');
+
+test('worktree management creates from a pinned revision and confirms clean removal', async () => {
+  const entries = [{ path: 'C:/repo', head: 'a'.repeat(40), branch: 'refs/heads/main', locked: null, prunable: null,
+    bare: false, main: true, current: true, dirty: false, error: '', fingerprint: 'main' },
+  { path: 'C:/task', head: 'a'.repeat(40), branch: 'refs/heads/task', locked: null, prunable: null,
+    bare: false, main: false, current: false, dirty: false, error: '', fingerprint: 'task' }];
+  const writes: { command: string; args: any }[] = [];
+  const opened: string[] = [];
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'read_worktrees') return { entries: structuredClone(entries), branches: [], head: 'a'.repeat(40) };
+    writes.push({ command, args });
+    if (command === 'edit_worktree') return '';
+    if (command === 'create_worktree') return args.request.path;
+    throw Error(command);
+  };
+  render(<WorktreeDialog root="C:/repo" onClose={() => {}} onChanged={async () => {}} onOpen={async path => { opened.push(path); }} />, host);
+  try {
+    await waitFor(() => host.querySelectorAll('.worktree-list button').length === 2);
+    (host.querySelectorAll('.worktree-list button')[1] as HTMLButtonElement).click();
+    await waitFor(() => [...host.querySelectorAll('button')].some(item => item.textContent === '删除此工作区…'));
+    button('打开此工作区').click();
+    await waitFor(() => opened.length === 1);
+    assert.equal(opened[0], 'C:/task');
+    await waitFor(() => !button('删除此工作区…').disabled);
+    button('删除此工作区…').click();
+    await waitFor(() => host.querySelector('[aria-label="确认删除 Worktree"]'));
+    assert.equal(writes.length, 0);
+    button('确认删除工作区').click();
+    await waitFor(() => writes.length === 1);
+    assert.equal(writes[0].args.entry.fingerprint, 'task');
+    await waitFor(() => !button('创建工作区').disabled || !host.querySelector('[aria-label="确认删除 Worktree"]'));
+    input('Worktree 目标目录', 'C:/new-tree');
+    input('Worktree 新分支名', 'new-task');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    submit();
+    await waitFor(() => writes.some(item => item.command === 'create_worktree'));
+    assert.equal(writes.at(-1)!.args.request.base, 'a'.repeat(40));
+  } finally { render(null, host); }
+});
 const head = 'a'.repeat(40);
 const remote = {
   name: 'origin',

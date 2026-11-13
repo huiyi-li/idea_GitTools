@@ -487,6 +487,49 @@ async fn preview_hunks(
         .preview_hunks(&path, &area)
         .await
 }
+
+#[tauri::command]
+async fn read_worktrees(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<git::worktrees::WorktreeOverview, String> {
+    active(&*state.0.lock().await, &root)?.worktrees().await
+}
+
+#[tauri::command]
+async fn create_worktree(
+    root: String,
+    request: git::worktrees::CreateWorktree,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .create_worktree(request)
+        .await
+}
+
+#[tauri::command]
+async fn edit_worktree(
+    root: String,
+    entry: git::worktrees::Worktree,
+    action: String,
+    reason: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_worktree(entry, &action, &reason)
+        .await
+}
+
+#[tauri::command]
+async fn prune_worktrees(
+    root: String,
+    entries: Vec<git::worktrees::Worktree>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .prune_worktrees(entries)
+        .await
+}
 #[tauri::command]
 async fn apply_hunk(
     root: String,
@@ -651,6 +694,10 @@ pub fn run() {
             push_tag,
             delete_remote_ref,
             preview_hunks,
+            read_worktrees,
+            create_worktree,
+            edit_worktree,
+            prune_worktrees,
             apply_hunk,
             preview_amend,
             amend_commit,

@@ -1195,6 +1195,14 @@ input[type='checkbox'] {
 .filter-actions input { max-width: 180px; }
 .saved-filters > span { display: inline-flex; gap: 2px; }
 .log-toolbar { flex-wrap: wrap; }
+.worktree-list { display: grid; gap: 8px; max-height: 30vh; overflow: auto; }
+.worktree-list button { display: grid; gap: 5px; padding: 10px; text-align: left; overflow-wrap: anywhere; }
+.worktree-list button.selected { border-color: var(--fg-link); background: var(--bg-selection); }
+.worktree-list small { color: var(--fg-info); }
+.worktree-create { margin-top: 16px; }
+.worktree-create summary { padding: 8px 0; cursor: pointer; }
+.confirmation { border: 1px solid var(--border); padding: 12px; margin-top: 12px; }
+.confirmation button { margin-right: 8px; }
 .transport-form label, .transport-auth label { display: grid; gap: 6px; }
 .transport-log { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg-editor); }
 .transport-auth { padding: 12px; border: 1px solid var(--border); }

@@ -18,6 +18,7 @@ pub(crate) mod merge;
 pub(crate) mod navigation;
 pub(crate) mod remotes;
 pub(crate) mod review;
+pub(crate) mod worktrees;
 
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;
 const MAX_FILE: usize = 1024 * 1024;
