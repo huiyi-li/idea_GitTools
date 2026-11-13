@@ -19,6 +19,7 @@ import {
   type LogPage,
   type Status,
 } from './api';
+import { changeListPath, readChangeLists, writeChangeLists, type ChangeListGroup } from './changelists';
 import { DiffView } from './DiffView';
 import { CloneDialog } from './TransportDialog';
 import { RemoteDialog, TransferDialog } from './RemoteDialog';
@@ -49,7 +50,7 @@ const MergeManager = lazy(() => import('./merge/MergeManager'));
 const HostingView = lazy(() => import('./hosting/HostingView'));
 const CommitReviewViewer = lazy(() => import('./review/CommitReviewViewer'));
 type View = 'log' | 'changes';
-type Dialog = { kind: 'branch' | 'stash'; value: string };
+type Dialog = { kind: 'branch' | 'stash' | 'shelf'; value: string };
 
 function ChangeList({
   changes,
@@ -60,6 +61,8 @@ function ChangeList({
   onHunks,
   onDiscard,
   onIgnore,
+  onAssign,
+  changeLists,
   unstage,
   busy,
 }: {
@@ -71,6 +74,8 @@ function ChangeList({
   onHunks?: (change: Change, area: 'staged' | 'unstaged') => void;
   onDiscard?: (changes: Change[], mode: DiscardMode) => void;
   onIgnore?: (path: string) => void;
+  onAssign?: (change: Change) => void;
+  changeLists?: ChangeListGroup[];
   unstage?: boolean;
   busy: boolean;
 }) {
@@ -127,6 +132,7 @@ function ChangeList({
                   {unstage ? '按块／按行取消暂存…' : '按块／按行暂存…'}
                 </button>
               )}
+              {onAssign && changeLists && <button onClick={() => onAssign(change)}>移动到 Changelist…</button>}
               <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
               {onIgnore && <button onClick={() => onIgnore(change.path)}>忽略规则／停止跟踪…</button>}
             </ActionMenu>
@@ -165,6 +171,11 @@ export function App() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [target, setTarget] = useState<DiffTarget | null>(null);
   const [message, setMessage] = useState('');
+  const [changeLists, setChangeLists] = useState<ChangeListGroup[]>([]);
+  const [activeChangeList, setActiveChangeList] = useState('');
+  const [changeListTarget, setChangeListTarget] = useState<Change | null>(null);
+  const [newChangeListName, setNewChangeListName] = useState('');
+  const [newChangeListDialog, setNewChangeListDialog] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [operationDialog, setOperationDialog] = useState<OperationPreview | null>(null);
   const [navigation, setNavigation] = useState<{ preview: NavigationPreview; creating: boolean } | null>(null);
@@ -186,7 +197,7 @@ export function App() {
   const [showClone, setShowClone] = useState(false);
   const [showRemotes, setShowRemotes] = useState(false);
   const [showManager, setShowManager] = useState(false);
-  const [managerTab, setManagerTab] = useState<'branches' | 'tags' | 'stashes'>('branches');
+  const [managerTab, setManagerTab] = useState<'branches' | 'tags' | 'stashes' | 'shelves'>('branches');
   const [managerStash, setManagerStash] = useState<Status['stashes'][number]>();
   const [branchDialog, setBranchDialog] = useState<{ branch: Branch; action: 'rename' | 'delete' } | null>(null);
   const [showWorktrees, setShowWorktrees] = useState(false);
@@ -211,6 +222,17 @@ export function App() {
     document.body.className = theme === 'light' ? 'ij-light' : 'ij-dark';
     save('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!root) {
+      setChangeLists([]);
+      setActiveChangeList('');
+      return;
+    }
+    const next = readChangeLists(root);
+    setChangeLists(next);
+    setActiveChangeList((current) => next.some((list) => list.id === current) ? current : '');
+  }, [root]);
 
   useEffect(() => {
     try { save('log.diffPreview', diffPreview); } catch { /* Keep the session preference. */ }
@@ -300,6 +322,9 @@ export function App() {
       setDetails(null);
       setTarget(null);
       setMessage('');
+      setChangeListTarget(null);
+      setNewChangeListDialog(false);
+      setNewChangeListName('');
       setOffset(0);
       setBranch('');
       setSearch('');
@@ -419,9 +444,54 @@ export function App() {
     });
   }
 
-  async function commit() {
-    const success = await mutate('create_commit', { message }, '提交');
-    if (success) setMessage('');
+  function pathMatchesList(change: Change, list: ChangeListGroup | undefined) {
+    return !list || changeListPath(change).some((path) => list.paths.includes(path));
+  }
+
+  function updateChangeLists(next: ChangeListGroup[]) {
+    if (!root) return;
+    setChangeLists(next);
+    writeChangeLists(root, next);
+  }
+
+  function assignToChangeList(change: Change, listId: string) {
+    const paths = changeListPath(change);
+    const next = changeLists.map((list) => ({ ...list, paths: list.paths.filter((path) => !paths.includes(path)) }));
+    if (listId) {
+      const target = next.find((list) => list.id === listId);
+      if (target) target.paths = [...new Set([...target.paths, ...paths])];
+    }
+    updateChangeLists(next);
+    setChangeListTarget(null);
+  }
+
+  function createAndAssignChangeList(change: Change) {
+    const name = newChangeListName.trim();
+    if (!name) return;
+    const list = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, paths: [] };
+    updateChangeLists([...changeLists, list]);
+    setNewChangeListName('');
+    assignToChangeList(change, list.id);
+  }
+
+  async function commit(list?: ChangeListGroup) {
+    const path = activeRoot.current;
+    if (!path) return;
+    const allStaged = status?.changes.filter(staged) ?? [];
+    const selectedFiles = allStaged.filter((change) => pathMatchesList(change, list));
+    if (!selectedFiles.length) return;
+    await perform('提交', async () => {
+      const excluded = allStaged.filter((change) => !pathMatchesList(change, list));
+      const excludedPaths = [...new Set(excluded.flatMap(changeListPath))];
+      try {
+        if (excludedPaths.length) await call('stage_paths', { root: path, paths: excludedPaths, unstage: true });
+        await call('create_commit', { root: path, message });
+        setMessage('');
+      } finally {
+        if (excludedPaths.length) await call('stage_paths', { root: path, paths: excludedPaths, unstage: false }).catch(() => {});
+        await refresh(path).catch((e) => setError(String(e)));
+      }
+    });
   }
 
   function previewHistory(
@@ -454,7 +524,7 @@ export function App() {
     }
   }
 
-  function openManager(tab: 'branches' | 'stashes', stash?: Status['stashes'][number]) {
+  function openManager(tab: 'branches' | 'tags' | 'stashes' | 'shelves', stash?: Status['stashes'][number]) {
     setManagerTab(tab);
     setManagerStash(stash);
     setShowManager(true);
@@ -635,8 +705,9 @@ export function App() {
     setTarget(null);
   }
 
-  const stagedFiles = status?.changes.filter(staged) ?? [];
-  const unstagedFiles = status?.changes.filter(unstaged) ?? [];
+  const activeList = changeLists.find((list) => list.id === activeChangeList);
+  const stagedFiles = status?.changes.filter((change) => staged(change) && pathMatchesList(change, activeList)) ?? [];
+  const unstagedFiles = status?.changes.filter((change) => unstaged(change) && pathMatchesList(change, activeList)) ?? [];
   const conflicts = status?.changes.filter((c) => c.conflict) ?? [];
   const selectedCommit = page.commits.find((commit) => commit.hash === selected);
   const historyDisabled =
@@ -702,6 +773,7 @@ export function App() {
             <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
             <button onClick={() => openManager('branches')}>分支、标签与 Stash</button>
             <button onClick={() => openManager('stashes')}>储藏管理</button>
+            <button onClick={() => openManager('shelves')}>Shelf 管理</button>
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
@@ -1055,6 +1127,19 @@ export function App() {
                 <section class="changes-panel">
                   <div class="panel-heading">
                     <span>本地更改</span>
+                    <label class="change-list-filter">
+                      Changelist
+                      <select
+                        aria-label="选择 Changelist"
+                        disabled={!!busy}
+                        value={activeChangeList}
+                        onChange={(event) => setActiveChangeList(event.currentTarget.value)}
+                      >
+                        <option value="">全部更改</option>
+                        {changeLists.map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}
+                      </select>
+                    </label>
+                    <button disabled={!!busy} onClick={() => { setNewChangeListName(''); setChangeListTarget(null); setNewChangeListDialog(true); }}>新建 Changelist</button>
                     <span class="spacer" />
                     <ActionMenu label="本地更改操作" text="操作" disabled={!!busy || !status.changes.length || !!conflicts.length}>
                       <button onClick={() => void previewDiscard(status.changes.map(change => change.path), 'all')}>放弃全部本地更改…</button>
@@ -1066,6 +1151,12 @@ export function App() {
                         !!busy || !status.changes.length || !status.repository.head || !!conflicts.length
                       }
                       onClick={() => setDialog({ kind: 'stash', value: 'Work in progress' })}
+                    />
+                    <ToolButton
+                      icon="vcsimpl/stash"
+                      label="保存到 Shelf"
+                      disabled={!!busy || !status.changes.length || !status.repository.head || !!conflicts.length}
+                      onClick={() => setDialog({ kind: 'shelf', value: 'Work in progress' })}
                     />
                   </div>
                   {!!conflicts.length && (
@@ -1112,6 +1203,8 @@ export function App() {
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
                         onIgnore={setIgnorePath}
+                        onAssign={(change) => setChangeListTarget(change)}
+                        changeLists={changeLists}
                         busy={!!busy}
                       />
                     </details>
@@ -1139,6 +1232,8 @@ export function App() {
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
                         onIgnore={setIgnorePath}
+                        onAssign={(change) => setChangeListTarget(change)}
+                        changeLists={changeLists}
                         unstage
                         busy={!!busy}
                       />
@@ -1155,17 +1250,17 @@ export function App() {
                       onInput={(event) => setMessage(event.currentTarget.value)}
                     />
                     <div class="commit-summary">
-                      {stagedFiles.length} 个暂存文件
+                      {stagedFiles.length} 个暂存文件{activeList ? ` · ${activeList.name}` : ''}
                       <span class="spacer" />
                       <span>Ctrl+Enter</span>
                     </div>
                     <button
                       class="primary"
                       disabled={!!busy || !stagedFiles.length || !message.trim() || !!conflicts.length}
-                      onClick={() => void commit()}
+                      onClick={() => void commit(activeList)}
                     >
                       <Icon name="vcs/commit" />
-                      提交暂存内容
+                      {activeList ? `提交 ${activeList.name}` : '提交暂存内容'}
                     </button>
                   </div>
                 </section>
@@ -1312,6 +1407,51 @@ export function App() {
         <CompareView root={root} branch={comparisonBranch} onClose={() => setComparisonBranch(null)} />
       )}
 
+      {(newChangeListDialog || changeListTarget) && (
+        <div class="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) { setNewChangeListDialog(false); setChangeListTarget(null); } }}>
+          <form
+            class="modal"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (changeListTarget) createAndAssignChangeList(changeListTarget);
+              else {
+                const name = newChangeListName.trim();
+                if (name) {
+                  const list = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, paths: [] };
+                  updateChangeLists([...changeLists, list]);
+                  setActiveChangeList(list.id);
+                  setNewChangeListName('');
+                  setNewChangeListDialog(false);
+                }
+              }
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={changeListTarget ? '移动到 Changelist' : '新建 Changelist'}
+          >
+            <h2>{changeListTarget ? '移动到 Changelist' : '新建 Changelist'}</h2>
+            {changeListTarget && (
+              <label>
+                目标 Changelist
+                <select aria-label="目标 Changelist" value="" onChange={(event) => assignToChangeList(changeListTarget, event.currentTarget.value)}>
+                  <option value="">从列表选择</option>
+                  {changeLists.map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}
+                </select>
+              </label>
+            )}
+            <label>
+              {changeListTarget ? '或新建名称' : '名称'}
+              <input autoFocus value={newChangeListName} disabled={!!busy} onInput={(event) => setNewChangeListName(event.currentTarget.value)} />
+            </label>
+            {changeListTarget && <button type="button" disabled={!!busy || !changeListTarget} onClick={() => assignToChangeList(changeListTarget, '')}>移出 Changelist</button>}
+            <div class="modal-actions">
+              <button type="button" disabled={!!busy} onClick={() => { setNewChangeListDialog(false); setChangeListTarget(null); }}>取消</button>
+              <button type="submit" class="primary" disabled={!!busy || !newChangeListName.trim()}>{changeListTarget ? '新建并移动' : '创建'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {dialog && (
         <div
           class="modal-backdrop"
@@ -1325,17 +1465,17 @@ export function App() {
               event.preventDefault();
               void mutate(
                 dialog.kind === 'branch' ? 'create_branch' : 'save_stash',
-                dialog.kind === 'branch' ? { name: dialog.value } : { message: dialog.value },
-                dialog.kind === 'branch' ? '创建分支' : '保存 Stash',
+                dialog.kind === 'branch' ? { name: dialog.value } : { message: dialog.kind === 'shelf' ? `Shelf: ${dialog.value}` : dialog.value },
+                dialog.kind === 'branch' ? '创建分支' : dialog.kind === 'shelf' ? '保存 Shelf' : '保存 Stash',
               ).then((success) => {
                 if (success) setDialog(null);
               });
             }}
             role="dialog"
             aria-modal="true"
-            aria-label={dialog.kind === 'branch' ? '新建分支' : '保存 Stash'}
+            aria-label={dialog.kind === 'branch' ? '新建分支' : dialog.kind === 'shelf' ? '保存 Shelf' : '保存 Stash'}
           >
-            <h2>{dialog.kind === 'branch' ? '新建并切换分支' : '保存到 Stash'}</h2>
+            <h2>{dialog.kind === 'branch' ? '新建并切换分支' : dialog.kind === 'shelf' ? '保存到 Shelf' : '保存到 Stash'}</h2>
             <label>
               {dialog.kind === 'branch' ? '分支名称' : '说明'}
               <input
@@ -1345,7 +1485,7 @@ export function App() {
                 onInput={(e) => setDialog({ ...dialog, value: e.currentTarget.value })}
               />
             </label>
-            {dialog.kind === 'stash' && <p class="muted">包含未跟踪文件，保存后清理工作区。</p>}
+            {dialog.kind !== 'branch' && <p class="muted">包含未跟踪文件，保存后清理工作区。Shelf 使用 Git stash 后端保存。</p>}
             {error && <p class="error-text">{error}</p>}
             <div class="modal-actions">
               <button type="button" disabled={!!busy} onClick={() => setDialog(null)}>
