@@ -819,6 +819,19 @@ impl Git {
         String::from_utf8(output).map_err(|_| "Patch 不是 UTF-8 文本".into())
     }
 
+    pub async fn write_patch_file(&self, revision: &str, destination: &str) -> Result<(), String> {
+        validate_hash(revision)?;
+        let destination = Path::new(destination);
+        if destination.as_os_str().is_empty() || destination.file_name().is_none() {
+            return Err("Patch 保存路径无效".into());
+        }
+        let output = self
+            .execute(&["format-patch", "-1", "--stdout", "--binary", "--full-index", revision], None)
+            .await?
+            .checked()?;
+        std::fs::write(destination, output).map_err(|error| format!("保存 Patch 失败：{error}"))
+    }
+
     pub async fn checkout(&self, name: &str) -> Result<(), String> {
         let status = self.status().await?;
         let branch = status

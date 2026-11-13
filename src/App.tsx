@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { lazy, Suspense } from 'preact/compat';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { UpdateManager, UPDATE_SESSION, readUpdateSession } from './UpdateManager';
 import {
@@ -531,13 +531,19 @@ export function App() {
     setCommitContext(null);
   }
 
-  async function copyCommitPatch() {
+  async function saveCommitPatch() {
     if (!commitContext || !root) return;
     const commit = commitContext.commit;
     await perform('生成 Patch', async () => {
-      const patch = await call<string>('create_patch', { root, revision: commit.hash });
-      await navigator.clipboard.writeText(patch);
-      setNotice(`已复制 ${commit.hash.slice(0, 8)} 的 Patch`);
+      const subject = commit.subject.trim().replace(/[\\/:*?"<>|\r\n]+/g, '-').slice(0, 80) || commit.hash.slice(0, 8);
+      const destination = await saveDialog({
+        title: '保存 Patch',
+        defaultPath: `${subject}.patch`,
+        filters: [{ name: 'Patch', extensions: ['patch'] }],
+      });
+      if (!destination) return;
+      await call('write_patch_file', { root, revision: commit.hash, destination });
+      setNotice(`已保存 ${commit.hash.slice(0, 8)} 的 Patch`);
       setCommitContext(null);
     });
   }
@@ -1455,7 +1461,7 @@ export function App() {
       )}
       {commitContext && <div class="action-popup commit-context-menu" role="menu" style={{ left: Math.max(8, Math.min(commitContext.x, window.innerWidth - 290)), top: Math.max(8, Math.min(commitContext.y, window.innerHeight - 150)) }}>
         <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitRevision()}>复制 Revision Number</button>
-        <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitPatch()}>创建 Patch 并复制</button>
+        <button role="menuitem" disabled={!!busy} onClick={() => void saveCommitPatch()}>保存为 Patch…</button>
         <hr />
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>

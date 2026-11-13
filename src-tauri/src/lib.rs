@@ -153,6 +153,18 @@ async fn create_patch(
 }
 
 #[tauri::command]
+async fn write_patch_file(
+    root: String,
+    revision: String,
+    destination: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .write_patch_file(&revision, &destination)
+        .await
+}
+
+#[tauri::command]
 async fn multi_repository_log(
     roots: Vec<String>,
     query: LogQuery,
@@ -959,6 +971,7 @@ pub fn run() {
             commit_details,
             generate_commit_message,
             create_patch,
+            write_patch_file,
             multi_repository_log,
             multi_repository_sync,
             read_diff,
