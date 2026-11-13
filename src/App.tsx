@@ -173,6 +173,7 @@ export function App() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [target, setTarget] = useState<DiffTarget | null>(null);
   const [message, setMessage] = useState('');
+  const [messageHistory, setMessageHistory] = useState<string[]>([]);
   const [changeLists, setChangeLists] = useState<ChangeListGroup[]>([]);
   const [activeChangeList, setActiveChangeList] = useState('');
   const [changeListTarget, setChangeListTarget] = useState<Change | null>(null);
@@ -236,6 +237,8 @@ export function App() {
     const next = readChangeLists(root);
     setChangeLists(next);
     setActiveChangeList((current) => next.some((list) => list.id === current) ? current : '');
+    const savedMessages = readSaved<unknown>(`commit.messages.${root}`, []);
+    setMessageHistory(Array.isArray(savedMessages) ? savedMessages.filter((item): item is string => typeof item === 'string').slice(0, 30) : []);
   }, [root]);
 
   useEffect(() => {
@@ -484,24 +487,28 @@ export function App() {
     assignToChangeList(change, list.id);
   }
 
-  async function commit(list?: ChangeListGroup) {
+  async function commit(list?: ChangeListGroup, pushAfter = false) {
     const path = activeRoot.current;
     if (!path) return;
     const allStaged = status?.changes.filter(staged) ?? [];
     const selectedFiles = allStaged.filter((change) => pathMatchesList(change, list));
     if (!selectedFiles.length) return;
-    await perform('提交', async () => {
+    const success = await perform('提交', async () => {
       const excluded = allStaged.filter((change) => !pathMatchesList(change, list));
       const excludedPaths = [...new Set(excluded.flatMap(changeListPath))];
       try {
         if (excludedPaths.length) await call('stage_paths', { root: path, paths: excludedPaths, unstage: true });
         await call('create_commit', { root: path, message });
+        const nextMessages = [message.trim(), ...messageHistory.filter((item) => item !== message.trim())].slice(0, 30);
+        setMessageHistory(nextMessages);
+        save(`commit.messages.${path}`, nextMessages);
         setMessage('');
       } finally {
         if (excludedPaths.length) await call('stage_paths', { root: path, paths: excludedPaths, unstage: false }).catch(() => {});
         await refresh(path).catch((e) => setError(String(e)));
       }
     });
+    if (success && pushAfter) setTransfer('push');
   }
 
   async function generateCommitMessage() {
@@ -1262,6 +1269,20 @@ export function App() {
                   </div>
                   <div class="commit-panel">
                     <label for="commit-message">提交说明</label>
+                    <label class="commit-history-field">
+                      提交说明历史
+                      <select
+                        aria-label="提交说明历史"
+                        disabled={!!busy || !messageHistory.length}
+                        value=""
+                        onChange={(event) => {
+                          if (event.currentTarget.value) setMessage(event.currentTarget.value);
+                        }}
+                      >
+                        <option value="">选择历史说明</option>
+                        {messageHistory.map((item, index) => <option key={`${item}-${index}`} value={item}>{item}</option>)}
+                      </select>
+                    </label>
                     <button type="button" disabled={!!busy || !stagedFiles.length} onClick={() => void generateCommitMessage()}>AI 提交说明</button>
                     <button disabled={!!busy || !status.repository.head || !['none', 'rebase'].includes(status.repository.operation)} onClick={() => setShowAmend(true)}>Amend 最近提交…</button>
                     <textarea
@@ -1283,6 +1304,13 @@ export function App() {
                     >
                       <Icon name="vcs/commit" />
                       {activeList ? `提交 ${activeList.name}` : '提交暂存内容'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!busy || !stagedFiles.length || !message.trim() || !!conflicts.length}
+                      onClick={() => void commit(activeList, true)}
+                    >
+                      提交并推送
                     </button>
                   </div>
                 </section>
