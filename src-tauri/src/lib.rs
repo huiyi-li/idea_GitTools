@@ -20,6 +20,14 @@ use tauri::Manager;
 use tauri::State;
 use tokio::sync::Mutex;
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiRepositoryCommit {
+    root: String,
+    name: String,
+    commit: Commit,
+}
+
 // One active repository and one operation at a time. A queued request carries its
 // repository root, so switching repositories cannot redirect a pending write.
 #[derive(Default)]
@@ -133,6 +141,52 @@ async fn generate_commit_message(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     active(&*state.0.lock().await, &root)?.generate_commit_message().await
+}
+
+#[tauri::command]
+async fn multi_repository_log(
+    roots: Vec<String>,
+    query: LogQuery,
+) -> Result<Vec<MultiRepositoryCommit>, String> {
+    if roots.is_empty() || roots.len() > 32 {
+        return Err("请选择 1 到 32 个仓库".into());
+    }
+    let mut commits = Vec::new();
+    for root in roots {
+        let git = Git::open(&root, None).await?;
+        let page = git.log(query.clone()).await?;
+        let name = git.root.file_name().and_then(|value| value.to_str()).unwrap_or("仓库").to_owned();
+        commits.extend(page.commits.into_iter().map(|commit| MultiRepositoryCommit {
+            root: git.root_string(),
+            name: name.clone(),
+            commit,
+        }));
+    }
+    commits.sort_by_key(|item| std::cmp::Reverse(item.commit.time));
+    commits.truncate(500);
+    Ok(commits)
+}
+
+#[tauri::command]
+async fn multi_repository_sync(roots: Vec<String>, action: String) -> Result<Vec<String>, String> {
+    if roots.is_empty() || roots.len() > 32 {
+        return Err("请选择 1 到 32 个仓库".into());
+    }
+    if !matches!(action.as_str(), "fetch" | "pull" | "push") {
+        return Err("不支持的多仓库同步操作".into());
+    }
+    let mut results = Vec::new();
+    for root in roots {
+        let git = Git::open(&root, None).await?;
+        let name = git.root.file_name().and_then(|value| value.to_str()).unwrap_or("仓库");
+        let output = git.remote_action(&action).await?;
+        results.push(if output.is_empty() {
+            format!("{name}: 完成")
+        } else {
+            format!("{name}: {output}")
+        });
+    }
+    Ok(results)
 }
 
 #[tauri::command]
@@ -895,6 +949,8 @@ pub fn run() {
             read_log,
             commit_details,
             generate_commit_message,
+            multi_repository_log,
+            multi_repository_sync,
             read_diff,
             read_commit_review,
             read_review_worktree,

@@ -30,6 +30,7 @@ import { HunkDialog, AmendDialog } from './HunkDialog';
 import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
 import { LocalHistoryDialog } from './LocalHistoryDialog';
+import { MultiRepositoryDialog } from './MultiRepositoryDialog';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
@@ -208,6 +209,7 @@ export function App() {
   const [showInteractive, setShowInteractive] = useState(false);
   const [fileHistory, setFileHistory] = useState(false);
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
+  const [showMultiRepository, setShowMultiRepository] = useState(false);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
@@ -693,7 +695,7 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (showUpdates) return;
-      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null) return;
+      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -715,7 +717,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, localHistoryPath, review, showUpdates]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, localHistoryPath, showMultiRepository, review, showUpdates]);
 
   function changeView(next: View) {
     setView(next);
@@ -796,6 +798,7 @@ export function App() {
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
             <button onClick={() => setLocalHistoryPath('')}>Local History</button>
+            <button onClick={() => setShowMultiRepository(true)}>多仓库同步与提交图</button>
             <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
             <button onClick={() => setShowBisect(true)}>Bisect</button>
             <button onClick={() => setShowSubmodules(true)}>Submodule 管理</button>
@@ -1315,7 +1318,7 @@ export function App() {
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
             (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
-              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || mergePath !== null || review ||
+              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository || mergePath !== null || review ||
               dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
           beforeInstall={() => {
@@ -1356,6 +1359,7 @@ export function App() {
       {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
+      {showMultiRepository && <MultiRepositoryDialog currentRoot={root} onClose={() => setShowMultiRepository(false)} />}
       {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={() => refresh(root, true)} />}
 
       {mergePath !== null && (
