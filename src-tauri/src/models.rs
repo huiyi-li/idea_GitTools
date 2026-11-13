@@ -103,6 +103,8 @@ pub struct LogQuery {
     pub path: String,
     #[serde(default)]
     pub revision: String,
+    #[serde(default)]
+    pub merge: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

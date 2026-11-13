@@ -170,6 +170,8 @@ export function TransferDialog({
   const [prune, setPrune] = useState(true);
   const [rebase, setRebase] = useState(false);
   const [force, setForce] = useState(false);
+  const [pushTags, setPushTags] = useState(false);
+  const [noVerify, setNoVerify] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [remoteHash, setRemoteHash] = useState<string | null>(null);
   const [commits, setCommits] = useState<Commit[]>([]);
@@ -240,6 +242,8 @@ export function TransferDialog({
             prune,
             rebase,
             force,
+            pushTags,
+            noVerify,
             expectedRemote: remoteHash,
             expectedRemoteConfig: overview.remotes.find((entry) => entry.name === remote),
           },
@@ -312,6 +316,14 @@ export function TransferDialog({
                 onChange={(event) => setSetUpstream(event.currentTarget.checked)}
               />
               设置 upstream
+            </label>
+            <label>
+              <input type="checkbox" checked={pushTags} disabled={busy} onChange={(event) => setPushTags(event.currentTarget.checked)} />
+              同时推送所有标签
+            </label>
+            <label>
+              <input type="checkbox" checked={noVerify} disabled={busy} onChange={(event) => setNoVerify(event.currentTarget.checked)} />
+              跳过本地 pre-push hook
             </label>
             <label>
               <input

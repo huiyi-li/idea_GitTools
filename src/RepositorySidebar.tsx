@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
-import type { Branch, Status } from './api';
+import { useEffect } from 'preact/hooks';
+import { readSaved, save, type Branch, type Status } from './api';
 import { ActionMenu, Icon, ToolButton } from './ui/controls';
 
 export type BranchAction = 'compare' | 'merge' | 'merge-ff-only' | 'merge-no-ff' | 'merge-squash' | 'rebase';
@@ -40,6 +41,15 @@ export function RepositorySidebar({
   const [search, setSearch] = useState('');
   const [context, setContext] = useState<{ branch: string; point: { x: number; y: number } }>();
   const [stashContext, setStashContext] = useState<{ reference: string; point: { x: number; y: number } }>();
+  const [favorites, setFavorites] = useState<string[]>(() => readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
+  useEffect(() => {
+    setFavorites(readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
+  }, [status.repository.root]);
+  function toggleFavorite(full: string) {
+    const next = favorites.includes(full) ? favorites.filter((item) => item !== full) : [...favorites, full];
+    setFavorites(next);
+    save(`branch.favorites.${status.repository.root}`, next);
+  }
   const branches = status.branches.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
   const historyDisabled =
     !status.repository.head ||
@@ -85,6 +95,14 @@ export function RepositorySidebar({
               <span>HEAD</span>
               <span class="tree-hint">当前分支</span>
             </button>
+            {!!favorites.length && <details class="tree-group" open>
+              <summary><Icon name="general/chevronRight" class="tree-chevron" /><Icon name="general/save" />收藏分支<span class="tree-hint">{favorites.length}</span></summary>
+              {branches.filter((item) => favorites.includes(item.full)).map((item) => (
+                <button class={`branch-item ${branch === item.full ? 'active' : ''}`} key={`favorite-${item.full}`} onClick={() => onFilter(item.full)}>
+                  <Icon name={item.current ? 'general/greenCheckmark' : 'dvcs/branchLabel'} /><span class="ellipsis">{item.name}</span>
+                </button>
+              ))}
+            </details>}
             {[false, true].map((remote) => (
               <details class="tree-group" open key={String(remote)}>
                 <summary>
@@ -123,6 +141,7 @@ export function RepositorySidebar({
                         )}
                       </button>
                       <div class="branch-actions">
+                        <ToolButton icon="general/save" label={favorites.includes(item.full) ? `取消收藏 ${item.name}` : `收藏 ${item.name}`} active={favorites.includes(item.full)} disabled={busy} onClick={() => toggleFavorite(item.full)} />
                         <ActionMenu label={`分支操作 ${item.name}`} disabled={busy} contextPoint={context?.branch === item.full ? context.point : undefined}>
                           <div class="menu-caption">{item.name} · {item.hash.slice(0, 8)}</div>
                           <button disabled={item.current} onClick={() => onCheckout(item.full)}>

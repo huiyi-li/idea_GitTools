@@ -30,6 +30,10 @@ pub(crate) struct TransferRequest {
     pub set_upstream: bool,
     pub rebase: bool,
     pub force: bool,
+    #[serde(default)]
+    pub push_tags: bool,
+    #[serde(default)]
+    pub no_verify: bool,
     #[serde(default = "default_prune")]
     pub prune: bool,
     pub expected_remote: Option<String>,
@@ -220,6 +224,12 @@ impl Git {
         match request.action.as_str() {
             "push" => {
                 command.args(["push", "--progress"]);
+                if request.push_tags {
+                    command.arg("--tags");
+                }
+                if request.no_verify {
+                    command.arg("--no-verify");
+                }
                 if request.set_upstream {
                     command.arg("--set-upstream");
                 }
@@ -372,6 +382,8 @@ mod tests {
             set_upstream: true,
             rebase: false,
             force: false,
+            push_tags: false,
+            no_verify: false,
             prune: true,
             expected_remote: None,
             expected_remote_config: Some(overview.remotes[0].clone()),
@@ -386,6 +398,8 @@ mod tests {
                 set_upstream: false,
                 rebase: false,
                 force: false,
+                push_tags: false,
+                no_verify: false,
                 prune: false,
                 expected_remote: None,
                 expected_remote_config: request.expected_remote_config.clone(),

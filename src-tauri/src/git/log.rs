@@ -101,6 +101,11 @@ impl Git {
             "--fixed-strings".into(),
             "--regexp-ignore-case".into(),
         ];
+        match query.merge.as_str() {
+            "merges" => args.push("--merges".into()),
+            "non-merges" => args.push("--no-merges".into()),
+            _ => {}
+        }
         for (option, value) in [("--grep", &query.search), ("--author", &query.author)] {
             if !value.is_empty() {
                 args.push(format!("{option}={value}"));

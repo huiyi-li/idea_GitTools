@@ -7,8 +7,9 @@ export interface LogFilters {
   until: string;
   path: string;
   revision: string;
+  merge: 'all' | 'merges' | 'non-merges';
 }
-export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '' };
+export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '', merge: 'all' };
 interface SavedFilter extends LogFilters {
   name: string;
   search: string;
@@ -54,6 +55,9 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
           <label key={key}>{label}<input aria-label={label} type={type} value={draft[key]} maxLength={4096}
             placeholder={key === 'path' ? '仓库相对路径' : key === 'revision' ? '至少 4 位 SHA，定位单条提交' : ''}
             onInput={event => { const value = event.currentTarget.value; setDraft(previous => ({ ...previous, [key]: value })); }} /></label>)}
+        <label>提交类型<select aria-label="提交类型" value={draft.merge} onChange={event => setDraft(previous => ({ ...previous, merge: event.currentTarget.value as LogFilters['merge'] }))}>
+          <option value="all">全部提交</option><option value="merges">仅合并提交</option><option value="non-merges">排除合并提交</option>
+        </select></label>
       </div>
       <div class="filter-actions">
         <button type="submit">应用筛选</button>
@@ -66,7 +70,7 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
     </form>
     {!!saved.length && <div class="saved-filters" aria-label="已保存筛选">{saved.map(item => <span key={item.name}>
       <button onClick={() => {
-        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision };
+        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision, merge: item.merge };
         setDraft(filters);
         onApply(filters, item.search, item.branch);
       }}>{item.name}</button>
