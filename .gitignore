@@ -1,6 +1,7 @@
 # Keep source, build manifests, required assets and release documentation at the root.
 /*
 !/.gitignore
+!/.github/
 !/LICENSE
 !/NOTICE
 !/README.md

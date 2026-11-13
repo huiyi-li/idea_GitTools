@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { lazy, Suspense } from 'preact/compat';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { version as appVersion } from '../package.json';
+import { UpdateManager, UPDATE_SESSION, readUpdateSession } from './UpdateManager';
 import {
   call,
   readSaved,
@@ -175,6 +175,7 @@ export function App() {
   const [commitContext, setCommitContext] = useState<{ commit: Commit; x: number; y: number } | null>(null);
   const [comparisonBranch, setComparisonBranch] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showUpdates, setShowUpdates] = useState(false);
   const [showHosting, setShowHosting] = useState(false);
   const [showClone, setShowClone] = useState(false);
   const [showRemotes, setShowRemotes] = useState(false);
@@ -194,6 +195,7 @@ export function App() {
   const [mergePath, setMergePath] = useState<string | null>(null);
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
   const gate = useRef(false);
+  const updateInstallation = useRef(false);
   const pendingRefresh = useRef(false);
   const activeRoot = useRef('');
   const root = status?.repository.root ?? '';
@@ -480,8 +482,13 @@ export function App() {
 
   useEffect(() => {
     void call<string | null>('initial_repository')
-      .then((path) => {
-        if (path) return openPath(path);
+      .then(async (path) => {
+        const session = readUpdateSession();
+        const next = path || session?.root;
+        if (next && await openPath(next)) {
+          if (session && (!path || path === session.root)) setMessage(session.message);
+          if (session) save(UPDATE_SESSION, null);
+        }
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -588,6 +595,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (showUpdates) return;
       if (showHosting || showClone || showRemotes || showManager || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
@@ -610,7 +618,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
 
   function changeView(next: View) {
     setView(next);
@@ -1177,7 +1185,30 @@ export function App() {
         <button class={showConsole ? 'active' : ''} onClick={() => setShowConsole(!showConsole)}>
           Console
         </button>
-        <span>{appVersion}</span>
+        <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
+          blocked={busy ? `正在${busy}，完成后可安装更新。` :
+            (showHosting || showClone || showRemotes || showManager || branchDialog || showWorktrees || ignorePath !== null ||
+              transfer || hunks || showAmend || showInteractive || fileHistory || mergePath !== null || review ||
+              dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
+              ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
+          beforeInstall={() => {
+            if (gate.current) throw new Error('Git 操作正在运行，请稍后重试。');
+            save(UPDATE_SESSION, { root: activeRoot.current, message, savedAt: Date.now() });
+            updateInstallation.current = true;
+            gate.current = true;
+            setBusy('安装更新');
+          }}
+          onInstallFailed={() => {
+            if (!updateInstallation.current) return;
+            updateInstallation.current = false;
+            gate.current = false;
+            setBusy('');
+            save(UPDATE_SESSION, null);
+            if (pendingRefresh.current) {
+              pendingRefresh.current = false;
+              void perform('刷新', () => refresh());
+            }
+          }} />
       </footer>
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}

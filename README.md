@@ -202,6 +202,36 @@ npm run package
 
 打包成功后自动将程序、安装包和许可证整理到项目根目录的 `release/`。双击 `release/IdeaGitTool.exe` 直接启动，或运行 `release/IdeaGitTool-setup.exe` 安装。
 
+### 应用内更新
+
+状态栏版本按钮可打开“软件更新”，查看新版本说明、下载进度并执行“安装并重启”。默认启动后检查一次更新，可关闭自动检查，也可开启发现新版本后自动下载。下载完成后验证更新签名，点击安装前保存当前仓库和提交信息草稿，重启后恢复。Git 操作或其他操作窗口仍在运行时，完成并关闭操作窗口后可安装更新。
+
+更新源为本仓库 [GitHub Releases](https://github.com/huiyi-li/idea_GitTools/releases)，使用固定地址 `https://github.com/huiyi-li/idea_GitTools/releases/latest/download/latest.json`。发布 tag 对应版本，客户端从最新正式 Release 读取清单。草稿和预发布版本不进入正式更新通道。此流程参考 [CC Switch](https://github.com/farion1231/cc-switch) 的 Tauri updater 接入，并使用 [Tauri 官方签名更新机制](https://v2.tauri.app/plugin/updater/)。
+
+Windows 更新沿用 NSIS 安装包和 passive 模式，安装到 Program Files 时可触发系统管理员授权。便携版也可检查更新，执行安装会进入 NSIS 安装流程。需要继续便携使用时，可从发布页获取 ZIP。网络超时、清单缺失或签名错误会显示提示并提供重试和发布页入口。
+
+### 签名密钥与本地打包
+
+应用配置只保存更新公钥。本机签名私钥位于 `%USERPROFILE%\.tauri\IdeaGitTool\updater.key`，同目录的 `updater.key.pub` 为公钥。密钥目录已限制为当前 Windows 用户访问。请在安全位置备份私钥，后续版本沿用同一密钥，丢失后现有客户端无法验证新密钥签名的更新。
+
+`npm run package` 优先读取 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，本机未设置环境变量时读取上述文件，密码默认为空。可用 `IDEAGITTOOL_SIGNING_KEY_PATH` 指定其他本地密钥路径，旁边需有匹配的 `.pub` 文件。更换构建机器时恢复已有密钥。派生项目可用 `npx tauri signer generate --ci -p "" -w <本地私钥路径>` 创建自身密钥，并将公钥正文写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。
+
+打包产物包括 `IdeaGitTool-setup.exe`、对应 `.sig`、便携 ZIP、`latest.json` 和哈希清单。清单中的签名为 `.sig` 文件正文。`RELEASE_TAG` 支持与应用版本一致的 `0.4.2` 或 `v0.4.2` 形式，默认使用应用版本。可用 `RELEASE_NOTES_FILE` 指定 UTF-8 发布说明文件。
+
+打包后可验证安装包签名、公钥匹配、篡改拒绝和全部产物哈希。
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_key_and_rejects_tampering -- --ignored
+```
+
+### GitHub 自动构建与发布
+
+在仓库 Settings → Secrets and variables → Actions 添加 `TAURI_SIGNING_PRIVATE_KEY`，值为已有私钥文件正文。私钥有密码时同时添加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥和密码通过 GitHub Actions secrets 注入构建，保留本地备份。
+
+`.github/workflows/release.yml` 在推送版本 tag 后验证三处版本一致性，执行测试、Clippy、签名打包和产物验签，然后创建带完整资源的 Release 草稿。支持重试上传草稿，已发布版本会拒绝覆盖。核对草稿后点击 Publish release，最新正式版本即可被客户端发现。仓库 Actions 需允许工作流写入仓库内容。
+
+准备发布时同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的应用版本，提交后创建并推送对应 tag。无需额外创建 release 分支。本次功能开发保留 `0.4.2`，已有 tag 与 Release 保持原状。首次使用应用内更新需先安装包含 updater 的构建。
+
 安装向导支持选择“当前用户”或“所有用户”。安装到 `C:\Program Files\IdeaGitTool` 时选择“所有用户”，并允许 Windows 管理员授权。双模式安装包启动时可能弹出 UAC 提示，选择“当前用户”时也可能需要授权。
 
 可通过命令行参数直接打开仓库。

@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -49,5 +50,14 @@
     },
     "shortDescription": "Lightweight Git client",
     "category": "DeveloperTool"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzQTI0ODc0MTJEN0YxMzIKUldReThkY1NkRWlpd3daeElFSkJFWHptV3NaKzlzcGxxWFJWZHV6c2FMaEhVMTVueVFOZTJPS2EK",
+      "endpoints": [
+        "https://github.com/huiyi-li/idea_GitTools/releases/latest/download/latest.json"
+      ],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

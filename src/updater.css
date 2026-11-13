@@ -1,0 +1,8 @@
+.modal.update-dialog { width: min(640px, 90vw); }
+.update-dialog p { white-space: normal; line-height: 1.6; }
+.update-dialog .update-option { display: flex; flex-direction: row; gap: 8px; align-items: center; margin: 12px 0; }
+.update-notes { margin: 18px 0; border-top: 1px solid var(--border); }
+.update-notes pre, .update-error { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 250px; overflow: auto; user-select: text; line-height: 1.6; }
+.update-dialog progress { width: 100%; margin-top: 16px; }
+.update-error, .update-warning { color: var(--error, #dc6c6c); }
+.statusbar .update-available { color: var(--accent, #75b6ec); }

@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "desktop": "tauri dev",
-    "package": "tauri build",
+    "package": "node scripts/package.mjs",
     "postpackage": "node scripts/collect-release.mjs",
     "test": "npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:native",
     "test:native": "node scripts/test-native.mjs",
@@ -24,6 +24,7 @@
     "@lezer/highlight": "^1.2.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "preact": "^10.24.3"
   },
   "devDependencies": {

@@ -322,6 +322,94 @@ test('advanced log filters combine conditions and save repository-specific prese
   } finally { render(null, root); }
 });
 
+test('installed update restores its repository and commit message draft through the normal startup entry', async () => {
+  const calls = fixture();
+  await waitFor(() => calls.some(item => item.command === 'read_log'));
+  render(null, root);
+  const backend = globalThis.testBackend;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'initial_repository') return null;
+    return backend(command, args);
+  };
+  localStorage.setItem('updater.session', JSON.stringify({ root: 'C:/fixture', message: 'Saved draft before update', savedAt: Date.now() }));
+  render(<App />, root);
+  try {
+    await waitFor(() => calls.filter(item => item.command === 'open_repository').length === 2);
+    await openChanges();
+    await waitFor(() => document.querySelector<HTMLTextAreaElement>('#commit-message')?.value === 'Saved draft before update');
+    assert.equal(localStorage.getItem('updater.session'), 'null');
+    assert.equal(calls.filter(item => item.command === 'open_repository')[1].args.path, 'C:/fixture');
+  } finally { render(null, root); }
+});
+
+test('updater installation saves the draft, locks focus refreshes and releases the workbench after failure', async () => {
+  const calls = fixture();
+  let savedSession: any;
+  (globalThis as any).testUpdater = async () => ({
+    version: '0.4.3', close: async () => {}, download: async () => {},
+    install: async () => {
+      savedSession = JSON.parse(localStorage.getItem('updater.session')!);
+      const count = calls.length;
+      window.dispatchEvent(new window.Event('focus'));
+      await new Promise(resolve => setTimeout(resolve, 40));
+      assert.equal(calls.length, count);
+      throw Error('user cancelled elevation');
+    },
+  });
+  try {
+    await openChanges();
+    const message = root.querySelector<HTMLTextAreaElement>('#commit-message')!;
+    message.value = 'Keep this commit draft';
+    message.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 40));
+    root.querySelector<HTMLButtonElement>('[title="软件更新"]')!.click();
+    await waitFor(() => document.querySelector('.update-dialog'));
+    button('检查更新').click();
+    await waitFor(() => document.querySelector('.update-dialog .primary')?.textContent === '下载更新');
+    button('下载更新').click();
+    await waitFor(() => document.querySelector('.update-dialog .primary')?.textContent === '安装并重启');
+    button('安装并重启').click();
+    await waitFor(() => document.querySelector('.update-error')?.textContent?.includes('user cancelled elevation'));
+    assert.equal(savedSession.root, 'C:/fixture');
+    assert.equal(savedSession.message, 'Keep this commit draft');
+    assert.equal(localStorage.getItem('updater.session'), 'null');
+    button('关闭').click();
+    await waitFor(() => !document.querySelector('.update-dialog'));
+    const before = calls.filter(item => item.command === 'repository_status').length;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F5', bubbles: true }));
+    await waitFor(() => calls.filter(item => item.command === 'repository_status').length > before);
+    assert.equal(message.value, 'Keep this commit draft');
+  } finally { render(null, root); delete (globalThis as any).testUpdater; }
+});
+
+test('a focus refresh racing with update installation retains its own operation lock', async () => {
+  const calls = fixture();
+  (globalThis as any).testUpdater = async () => ({ version: '0.4.3', close: async () => {}, download: async () => {},
+    install: async () => { assert.fail('Installing during a repository refresh'); } });
+  try {
+    await waitFor(() => calls.some(item => item.command === 'read_log'));
+    root.querySelector<HTMLButtonElement>('[title="软件更新"]')!.click();
+    await waitFor(() => document.querySelector('.update-dialog'));
+    button('检查更新').click();
+    await waitFor(() => document.querySelector('.update-dialog .primary')?.textContent === '下载更新');
+    button('下载更新').click();
+    await waitFor(() => document.querySelector('.update-dialog .primary')?.textContent === '安装并重启');
+    const backend = globalThis.testBackend;
+    const status = await backend('repository_status', { root: 'C:/fixture' });
+    let finish!: (value: unknown) => void;
+    globalThis.testBackend = async (command: string, args: any) => command === 'repository_status'
+      ? new Promise(resolve => { finish = resolve; }) : backend(command, args);
+    window.dispatchEvent(new window.Event('focus'));
+    button('安装并重启').click();
+    await waitFor(() => document.querySelector('.update-error')?.textContent?.includes('Git 操作正在运行'));
+    assert.ok(root.querySelector('.statusbar')?.textContent?.includes('刷新…'));
+    assert.equal(button('安装并重启').disabled, true);
+    globalThis.testBackend = backend;
+    finish(status);
+    await waitFor(() => !button('安装并重启').disabled);
+  } finally { render(null, root); delete (globalThis as any).testUpdater; }
+});
+
 test('log layout loads the diff through its normal entry point and filters branches', async () => {
   const calls = fixture();
   try {

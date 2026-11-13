@@ -2,6 +2,8 @@ mod git;
 mod hosting;
 mod models;
 pub mod transport;
+#[cfg(test)]
+mod update_tests;
 mod watcher;
 
 use git::discard::{DiscardMode, DiscardPreview};
@@ -52,6 +54,17 @@ async fn open_repository(
 #[tauri::command]
 fn initial_repository() -> Option<String> {
     std::env::args().nth(1).filter(|p| !p.starts_with('-'))
+}
+
+#[tauri::command]
+fn open_release_page(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(
+            "https://github.com/huiyi-li/idea_GitTools/releases",
+            None::<&str>,
+        )
+        .map_err(|e| format!("打开发布页失败。{e}"))
 }
 
 #[tauri::command]
@@ -744,6 +757,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             app.manage(hosting::Hosting::new(directory).map_err(std::io::Error::other)?);
@@ -786,6 +800,7 @@ pub fn run() {
             file_blame,
             fetch_review_branch,
             initial_repository,
+            open_release_page,
             open_repository,
             repository_status,
             read_log,
