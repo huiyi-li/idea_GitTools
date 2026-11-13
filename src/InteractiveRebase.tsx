@@ -41,11 +41,13 @@ export function autosquash(entries: Entry[], commits: Commit[]) {
 export function InteractiveRebase({
   root,
   initialBase = '',
+  initialAction,
   onClose,
   onChanged,
 }: {
   root: string;
   initialBase?: string;
+  initialAction?: { hash: string; action: Entry['action'] };
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
@@ -72,7 +74,7 @@ export function InteractiveRebase({
       setEntries(
         preview.commits.map((commit) => ({
           hash: commit.hash,
-          action: 'pick',
+          action: commit.hash === initialAction?.hash ? initialAction.action : 'pick',
           message: '',
         })),
       );

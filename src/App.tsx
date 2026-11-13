@@ -210,6 +210,7 @@ export function App() {
   const [showAmend, setShowAmend] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
   const [interactiveBase, setInteractiveBase] = useState('');
+  const [interactiveAction, setInteractiveAction] = useState<{ hash: string; action: 'reword' | 'fixup' | 'squash' | 'drop' }>();
   const [fileHistory, setFileHistory] = useState(false);
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [showMultiRepository, setShowMultiRepository] = useState(false);
@@ -587,6 +588,13 @@ export function App() {
     setShowManager(true);
   }
 
+  function openInteractiveFor(commit: Commit, action?: 'reword' | 'fixup' | 'squash' | 'drop') {
+    setCommitContext(null);
+    setInteractiveBase(commit.parents[0] ?? '');
+    setInteractiveAction(action ? { hash: commit.hash, action } : undefined);
+    setShowInteractive(true);
+  }
+
   async function previewNavigation(target: string, action: NavigationAction = 'checkout', creating = false) {
     const path = activeRoot.current;
     if (!path) return;
@@ -833,7 +841,7 @@ export function App() {
             <button onClick={() => openManager('shelves')}>Shelf 管理</button>
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
-            <button onClick={() => { setInteractiveBase(''); setShowInteractive(true); }}>交互式 Rebase</button>
+            <button onClick={() => { setInteractiveBase(''); setInteractiveAction(undefined); setShowInteractive(true); }}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
             <button onClick={() => setLocalHistoryPath('')}>Local History</button>
             <button onClick={() => setShowMultiRepository(true)}>多仓库同步与提交图</button>
@@ -1415,7 +1423,7 @@ export function App() {
       {ignorePath !== null && root && <IgnoreDialog key={root} root={root} initialPath={ignorePath} onClose={() => setIgnorePath(null)} onChanged={() => refresh(root)} />}
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
-      {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}`} root={root} initialBase={interactiveBase} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
+      {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}-${interactiveAction?.hash ?? ''}-${interactiveAction?.action ?? ''}`} root={root} initialBase={interactiveBase} initialAction={interactiveAction} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
       {showMultiRepository && <MultiRepositoryDialog currentRoot={root} onClose={() => setShowMultiRepository(false)} />}
@@ -1465,10 +1473,70 @@ export function App() {
       {commitContext && <div class="action-popup commit-context-menu" role="menu" style={{ left: Math.max(8, Math.min(commitContext.x, window.innerWidth - 290)), top: Math.max(8, Math.min(commitContext.y, window.innerHeight - 150)) }}>
         <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitRevision()}>复制 Revision Number</button>
         <button role="menuitem" disabled={!!busy} onClick={() => void saveCommitPatch()}>保存为 Patch…</button>
+        <button
+          role="menuitem"
+          disabled={!!busy || !commitContext.commit.parents[0]}
+          onClick={() => {
+            const parent = commitContext.commit.parents[0];
+            if (!parent) return;
+            setSelected(parent);
+            setCommitContext(null);
+          }}
+        >
+          跳转到父提交
+        </button>
+        <button
+          role="menuitem"
+          disabled={!!busy || !page.commits.some((commit) => commit.parents.includes(commitContext.commit.hash))}
+          onClick={() => {
+            const child = page.commits.find((commit) => commit.parents.includes(commitContext.commit.hash));
+            if (!child) return;
+            setSelected(child.hash);
+            setCommitContext(null);
+          }}
+        >
+          跳转到子提交
+        </button>
         <hr />
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
         <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
         <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>
+        <hr />
+        <button
+          role="menuitem"
+          disabled={!!busy || !commitContext.commit.parents[0] || status?.repository.head !== commitContext.commit.hash || status.repository.operation !== 'none' || !!status.changes.length}
+          onClick={() => void previewNavigation(commitContext.commit.parents[0] ?? '', 'reset')}
+        >
+          撤销当前提交…
+        </button>
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => openInteractiveFor(commitContext.commit, 'reword')}
+        >
+          编辑提交说明…
+        </button>
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => openInteractiveFor(commitContext.commit, 'fixup')}
+        >
+          Fixup 到上一个提交…
+        </button>
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => openInteractiveFor(commitContext.commit, 'squash')}
+        >
+          Squash 到上一个提交…
+        </button>
+        <button
+          role="menuitem"
+          disabled={historyDisabled}
+          onClick={() => openInteractiveFor(commitContext.commit, 'drop')}
+        >
+          删除此提交…
+        </button>
         <hr />
         <button
           role="menuitem"
