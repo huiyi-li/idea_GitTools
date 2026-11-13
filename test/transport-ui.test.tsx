@@ -113,6 +113,7 @@ const { RemoteDialog, TransferDialog } = await import('../src/RemoteDialog');
 const { RepositoryManager } = await import('../src/RepositoryManager');
 const { WorktreeDialog } = await import('../src/WorktreeDialog');
 const { IgnoreDialog, ignorePattern } = await import('../src/IgnoreDialog');
+const { BranchDialog } = await import('../src/BranchDialog');
 const { HunkDialog, AmendDialog } = await import('../src/HunkDialog');
 const { InteractiveRebase, autosquash } = await import('../src/InteractiveRebase');
 const { FileHistoryDialog } = await import('../src/FileHistoryDialog');
@@ -388,6 +389,30 @@ test('ignore rules escape literal filenames, explain sources and confirm stoppin
     toggle.checked = false;
     toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
     await waitFor(() => host.querySelector('[aria-label="已跟踪文件列表"]'));
+  } finally { render(null, host); }
+});
+
+test('remote branch deletion uses the selected remote, exact head and authenticated transport', async () => {
+  const branch = { name: 'company/origin/topic', full: 'refs/remotes/company/origin/topic', hash: 'b'.repeat(40), current: false, remote: true, upstream: '' };
+  let request: any;
+  let closed = false;
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'repository_status') return { ...status, branches: [branch] };
+    if (command === 'transfer_overview') return { remotes: [{ name: 'company' }, { name: 'company/origin' }] };
+    if (command === 'delete_remote_ref') { request = args; return 'delete-job'; }
+    if (command === 'transport_progress') return { id: 'delete-job', state: 'done', directory: 'C:/repo', prompt: null, lines: ['deleted'], error: '' };
+    throw Error(command);
+  };
+  render(<BranchDialog root="C:/repo" initialBranch={branch} action="delete" onClose={() => { closed = true; }} onChanged={async () => {}} onOpen={async () => {}} />, host);
+  try {
+    await waitFor(() => !button('确认删除分支').disabled);
+    assert.equal(request, undefined);
+    button('确认删除分支').click();
+    await waitFor(() => closed);
+    assert.equal(request.remote, 'company/origin');
+    assert.equal(request.name, 'topic');
+    assert.equal(request.hash, 'b'.repeat(40));
+    assert.equal(request.kind, 'heads');
   } finally { render(null, host); }
 });
 

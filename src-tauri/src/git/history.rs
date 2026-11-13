@@ -17,6 +17,7 @@ pub(crate) enum MergeMode {
     Auto,
     NoFf,
     FfOnly,
+    Squash,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -104,7 +105,7 @@ impl Git {
         if status.repository.operation != "none" {
             return Err("请先继续或中止当前 Git 操作".into());
         }
-        if !status.changes.is_empty() {
+        if !status.changes.is_empty() && !matches!(request.action, HistoryAction::Merge) {
             return Err("请先提交或保存到 Stash，工作区和暂存区需要保持干净".into());
         }
         let mut args = match request.action {
@@ -129,6 +130,7 @@ impl Git {
                             MergeMode::Auto => "--ff",
                             MergeMode::NoFf => "--no-ff",
                             MergeMode::FfOnly => "--ff-only",
+                            MergeMode::Squash => "--squash",
                         },
                     ],
                     _ => vec!["-c", "rebase.updateRefs=false", "rebase", "--no-autostash"],

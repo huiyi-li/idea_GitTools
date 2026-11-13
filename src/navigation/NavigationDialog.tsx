@@ -28,7 +28,7 @@ export function NavigationDialog({ preview, creating = false, busy, result, erro
   const reset = preview.action === 'reset';
   const create = creating || preview.remote;
   const blocked = result?.kind === 'overwrite';
-  const disabled = busy || !!preview.worktreePath || (create && !newBranch.trim()) || (reset && mode === 'hard' && !confirmHard);
+  const disabled = busy || (!reset && !create && !!preview.worktreePath) || (create && !newBranch.trim()) || (reset && mode === 'hard' && !confirmHard);
   const title = reset ? '重置当前分支到此提交' : creating ? '从此提交创建分支' : '签出';
   const request = (strategy: NavigationRequest['strategy']): NavigationRequest => ({ preview, mode, strategy, newBranch: create ? newBranch.trim() : null });
   return <Modal title={title} busy={busy} onClose={onClose} class="history-dialog navigation-dialog">
@@ -46,7 +46,7 @@ export function NavigationDialog({ preview, creating = false, busy, result, erro
         </select>
       </label>}
       {create && <label>{preview.remote ? '新建本地跟踪分支' : '新分支名称'}<input aria-label="新分支名称" value={newBranch} disabled={busy} required onInput={(e) => setNewBranch(e.currentTarget.value)} /></label>}
-      {preview.worktreePath && <div class="navigation-warning">该分支正在其他 worktree 使用：<p class="mono">{preview.worktreePath}</p><button type="button" disabled={busy} onClick={() => onOpen(preview.worktreePath!)}>打开此 worktree</button></div>}
+      {preview.worktreePath && !reset && !create && <div class="navigation-warning">该分支正在其他 worktree 使用：<p class="mono">{preview.worktreePath}</p><button type="button" disabled={busy} onClick={() => onOpen(preview.worktreePath!)}>打开此 worktree</button></div>}
       {reset && <>
         <label>Reset 模式<select aria-label="Reset 模式" value={mode} disabled={busy} onChange={(e) => { setMode(e.currentTarget.value as ResetMode); setConfirmHard(false); }}>
           {Object.keys(resetModes).map((m) => <option key={m} value={m}>{m[0].toUpperCase() + m.slice(1)}</option>)}

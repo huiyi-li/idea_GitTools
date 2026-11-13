@@ -115,7 +115,6 @@ async fn rejects_dirty_or_stale_requests_without_changing_the_repository() {
     let target = diverge(&git, false).await;
     let merge = request(&git, HistoryAction::Merge, "refs/heads/feature").await;
     for action in [
-        HistoryAction::Merge,
         HistoryAction::Rebase,
         HistoryAction::CherryPick,
         HistoryAction::Revert,
@@ -164,6 +163,40 @@ async fn rejects_dirty_or_stale_requests_without_changing_the_repository() {
     git.create_branch("other").await.unwrap();
     assert!(git.start_history(stale).await.unwrap_err().contains("HEAD"));
     assert!(git.status().await.unwrap().changes.is_empty());
+}
+
+#[tokio::test]
+async fn native_merge_carries_unrelated_local_changes_and_refuses_overwrites() {
+    let (dir, git) = setup().await;
+    diverge(&git, false).await;
+    fs::write(dir.path().join("local.txt"), "untracked task\n").unwrap();
+    fs::write(dir.path().join("shared.txt"), "local task\n").unwrap();
+    git.start_history(request(&git, HistoryAction::Merge, "refs/heads/feature").await)
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("local.txt")).unwrap(),
+        "untracked task\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "local task\n"
+    );
+    assert!(dir.path().join("feature.txt").exists());
+
+    let (dir, git) = setup().await;
+    diverge(&git, true).await;
+    fs::write(dir.path().join("shared.txt"), "manual work\n").unwrap();
+    let operation = request(&git, HistoryAction::Merge, "refs/heads/feature").await;
+    let head = operation.expected_head.clone();
+    let index = run(dir.path(), &["ls-files", "--stage", "-z"]);
+    assert!(git.start_history(operation).await.is_err());
+    assert_eq!(git.head().await.unwrap().unwrap(), head);
+    assert_eq!(run(dir.path(), &["ls-files", "--stage", "-z"]), index);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "manual work\n"
+    );
 }
 
 #[tokio::test]
@@ -255,6 +288,48 @@ async fn started_merge_and_rebase_conflicts_use_the_existing_merge_manager() {
         );
         assert!(git.status().await.unwrap().changes.is_empty());
         assert_eq!(run(dir.path(), &["rev-parse", "keep"]).trim(), old_head);
+    }
+}
+
+#[tokio::test]
+async fn squash_merge_stages_a_single_result_and_conflicts_resolve_through_the_merge_manager() {
+    for conflict in [false, true] {
+        let (_dir, mut git) = setup().await;
+        diverge(&git, conflict).await;
+        let mut operation = request(&git, HistoryAction::Merge, "refs/heads/feature").await;
+        let head = operation.expected_head.clone();
+        operation.merge_mode = MergeMode::Squash;
+        let result = git.start_history(operation).await;
+        assert_eq!(git.head().await.unwrap().unwrap(), head);
+        assert_eq!(git.repository().await.unwrap().operation, "none");
+        if conflict {
+            assert!(result.is_err());
+            let document =
+                serde_json::to_value(git.open_merge("shared.txt".into()).await.unwrap()).unwrap();
+            git.save_merge(SaveMerge {
+                id: document["id"].as_str().unwrap().into(),
+                choice: "right".into(),
+                finish: true,
+                progress: None,
+            })
+            .await
+            .unwrap();
+        } else {
+            assert!(result.is_ok());
+        }
+        assert!(git
+            .status()
+            .await
+            .unwrap()
+            .changes
+            .iter()
+            .any(|change| change.index != ' '));
+        git.commit("squashed feature").await.unwrap();
+        let details = git
+            .details(&git.head().await.unwrap().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(details.commit.parents, vec![head]);
     }
 }
 

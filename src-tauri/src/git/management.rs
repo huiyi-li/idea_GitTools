@@ -98,6 +98,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleting_unmerged_and_occupied_branches_requires_native_git_protections() {
+        let (directory, git, base) = tracked().await;
+        git.create_branch("unmerged").await.unwrap();
+        std::fs::write(directory.path().join("topic.txt"), "topic\n").unwrap();
+        git.stage(vec!["topic.txt".into()], false).await.unwrap();
+        git.commit("topic").await.unwrap();
+        let head = git.head().await.unwrap().unwrap();
+        git.checkout("refs/heads/main").await.unwrap();
+        let deletion = |name: &str, hash: &str, force| RefEdit {
+            action: "branch-delete".into(),
+            name: name.into(),
+            new_name: String::new(),
+            hash: hash.into(),
+            message: String::new(),
+            force,
+        };
+        assert!(git
+            .edit_ref(deletion("unmerged", &base, true))
+            .await
+            .is_err());
+        assert!(git
+            .edit_ref(deletion("unmerged", &head, false))
+            .await
+            .is_err());
+        git.edit_ref(deletion("unmerged", &head, true))
+            .await
+            .unwrap();
+        run(directory.path(), &["branch", "occupied"]);
+        let parent = tempfile::tempdir().unwrap();
+        run(
+            directory.path(),
+            &[
+                "worktree",
+                "add",
+                &git_path(&parent.path().join("linked")),
+                "occupied",
+            ],
+        );
+        assert!(git
+            .edit_ref(deletion("occupied", &base, true))
+            .await
+            .is_err());
+        assert_eq!(
+            run(directory.path(), &["rev-parse", "occupied"]).trim(),
+            base
+        );
+    }
+
+    #[tokio::test]
     async fn stash_preview_includes_untracked_files_and_pop_restores_the_staged_layout() {
         let (directory, git, _) = tracked().await;
         std::fs::write(directory.path().join("file.txt"), "staged\n").unwrap();

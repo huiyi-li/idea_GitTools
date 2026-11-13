@@ -2,6 +2,8 @@ import { useState } from 'preact/hooks';
 import type { Branch, Status } from './api';
 import { ActionMenu, Icon, ToolButton } from './ui/controls';
 
+export type BranchAction = 'compare' | 'merge' | 'merge-ff-only' | 'merge-no-ff' | 'merge-squash' | 'rebase';
+
 export function RepositorySidebar({
   status,
   branch,
@@ -15,6 +17,8 @@ export function RepositorySidebar({
   onApplyStash,
   onOpen,
   onAction,
+  onManage,
+  onEdit,
 }: {
   status: Status;
   branch: string;
@@ -22,26 +26,31 @@ export function RepositorySidebar({
   recent: string[];
   onFilter: (branch: string) => void;
   onCheckout: (branch: string) => void;
-  onCreate: () => void;
+  onCreate: (branch?: Branch) => void;
   onFetch: () => void;
   onStash: () => void;
   onApplyStash: (hash: string) => void;
   onOpen: (path: string) => void;
-  onAction: (branch: Branch, action: 'compare' | 'merge' | 'rebase') => void;
+  onAction: (branch: Branch, action: BranchAction) => void;
+  onManage: () => void;
+  onEdit: (branch: Branch, action: 'rename' | 'delete') => void;
 }) {
   const [search, setSearch] = useState('');
+  const [context, setContext] = useState<{ branch: string; point: { x: number; y: number } }>();
   const branches = status.branches.filter((item) => item.name.toLowerCase().includes(search.toLowerCase()));
   const historyDisabled =
     !status.repository.head ||
     !status.repository.branch ||
     status.repository.operation !== 'none' ||
     !!status.changes.length;
+  const mergeDisabled = !status.repository.head || !status.repository.branch || status.repository.operation !== 'none' || status.changes.some(change => change.conflict);
   return (
     <aside class="sidebar">
       <div class="panel-heading">
         <span>分支</span>
         <span class="spacer" />
-        <ToolButton icon="general/add" label="新建并切换分支" disabled={busy} onClick={onCreate} />
+        <button disabled={busy} onClick={onManage}>管理</button>
+        <ToolButton icon="general/add" label="新建并切换分支" disabled={busy} onClick={() => onCreate()} />
       </div>
       <div class="branches-panel">
         <div class="branch-tools">
@@ -84,11 +93,19 @@ export function RepositorySidebar({
                 {branches
                   .filter((item) => item.remote === remote)
                   .map((item) => (
-                    <div class={`branch-line ${item.current ? 'current-branch' : ''}`} key={item.full}>
+                    <div class={`branch-line ${item.current ? 'current-branch' : ''}`} key={item.full}
+                      onContextMenu={event => { event.preventDefault(); if (!busy) setContext({ branch: item.full, point: { x: event.clientX, y: event.clientY } }); }}>
                       <button
                         class={`branch-item ${branch === item.full ? 'active' : ''}`}
                         title={`${item.name}${item.upstream ? ` → ${item.upstream}` : ''}\n单击筛选日志，双击签出`}
                         onClick={() => onFilter(item.full)}
+                        onKeyDown={event => {
+                          if ((event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') && !busy) {
+                            event.preventDefault();
+                            const bounds = event.currentTarget.getBoundingClientRect();
+                            setContext({ branch: item.full, point: { x: bounds.left + 20, y: bounds.bottom } });
+                          }
+                        }}
                         onDblClick={() => {
                           if (!busy && !item.current) onCheckout(item.full);
                         }}
@@ -97,11 +114,13 @@ export function RepositorySidebar({
                         <span class="ellipsis">{item.name}</span>
                       </button>
                       <div class="branch-actions">
-                        <ActionMenu label={`分支操作 ${item.name}`} disabled={busy}>
+                        <ActionMenu label={`分支操作 ${item.name}`} disabled={busy} contextPoint={context?.branch === item.full ? context.point : undefined}>
+                          <div class="menu-caption">{item.name} · {item.hash.slice(0, 8)}</div>
                           <button disabled={item.current} onClick={() => onCheckout(item.full)}>
                             签出 {item.name}
                           </button>
                           {item.remote && <button onClick={() => onCheckout(item.full)}>签出并创建本地跟踪分支…</button>}
+                          <button disabled={!status.repository.head || status.repository.operation !== 'none'} onClick={() => onCreate(item)}>从此分支新建并签出…</button>
                           <button
                             disabled={!status.repository.head}
                             onClick={() => onAction(item, 'compare')}
@@ -110,12 +129,15 @@ export function RepositorySidebar({
                           </button>
                           <hr />
                           <button
-                            disabled={item.current || historyDisabled}
-                            title={status.changes.length ? '先提交或保存到 Stash' : ''}
+                            disabled={item.current || mergeDisabled}
+                            title={status.changes.length ? 'Git 将检查是否会覆盖本地更改' : ''}
                             onClick={() => onAction(item, 'merge')}
                           >
                             Merge 到当前分支…
                           </button>
+                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-ff-only')}>仅快进合并到 {status.repository.branch}…</button>
+                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-no-ff')}>创建合并提交到 {status.repository.branch}…</button>
+                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-squash')}>Squash 合并到 {status.repository.branch}…</button>
                           <button
                             disabled={item.current || historyDisabled}
                             title={status.changes.length ? '先提交或保存到 Stash' : ''}
@@ -123,6 +145,9 @@ export function RepositorySidebar({
                           >
                             Rebase 当前分支到此处…
                           </button>
+                          <hr />
+                          {!item.remote && <button disabled={status.repository.operation !== 'none'} onClick={() => onEdit(item, 'rename')}>重命名分支…</button>}
+                          <button disabled={item.current || status.repository.operation !== 'none'} onClick={() => onEdit(item, 'delete')}>{item.remote ? '删除远程分支…' : '删除本地分支…'}</button>
                         </ActionMenu>
                       </div>
                     </div>

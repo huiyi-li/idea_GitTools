@@ -37,6 +37,36 @@ async fn dirty(git: &Git) {
 }
 
 #[tokio::test]
+async fn a_new_branch_can_start_from_a_branch_occupied_by_another_worktree() {
+    let (dir, git, _base, head) = setup().await;
+    run(dir.path(), &["branch", "occupied"]);
+    let parent = tempfile::tempdir().unwrap();
+    let other = parent.path().join("linked");
+    run(
+        dir.path(),
+        &["worktree", "add", &git_path(&other), "occupied"],
+    );
+    let preview = git
+        .preview_navigation("refs/heads/occupied", NavigationAction::Checkout)
+        .await
+        .unwrap();
+    assert!(preview.worktree_path.is_some());
+    let mut request = request(preview, ResetMode::Mixed, LocalStrategy::Normal);
+    request.new_branch = Some("from-occupied".into());
+    let result = git.execute_navigation(request).await.unwrap();
+    assert!(result.completed, "{}", result.message);
+    assert_eq!(
+        git.repository().await.unwrap().branch.as_deref(),
+        Some("from-occupied")
+    );
+    assert_eq!(git.head().await.unwrap().unwrap(), head);
+    assert_eq!(
+        run(&other, &["branch", "--show-current"]).trim(),
+        "occupied"
+    );
+}
+
+#[tokio::test]
 async fn four_reset_modes_follow_native_head_index_and_worktree_semantics() {
     for mode in [
         ResetMode::Soft,

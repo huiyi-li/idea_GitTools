@@ -69,7 +69,7 @@ export interface HistoryRequest {
   targetHash: string;
   expectedHead: string;
   expectedBranch: string;
-  mergeMode: 'auto' | 'no-ff' | 'ff-only';
+  mergeMode: 'auto' | 'no-ff' | 'ff-only' | 'squash';
   mainline: number | null;
 }
 

@@ -82,34 +82,41 @@ export function ActionMenu({
   icon = 'general/moreHorizontal',
   text,
   disabled,
+  contextPoint,
   children,
 }: {
   label: string;
   icon?: string;
   text?: string;
   disabled?: boolean;
+  contextPoint?: { x: number; y: number };
   children: ComponentChildren;
 }) {
   const [opened, setOpened] = useState(false);
+  const [anchorPoint, setAnchorPoint] = useState<{ x: number; y: number }>();
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  useEffect(() => {
+    if (contextPoint && !disabled) { setAnchorPoint(contextPoint); setOpened(true); }
+  }, [contextPoint]);
+  useEffect(() => { if (disabled) setOpened(false); }, [disabled]);
   useLayoutEffect(() => {
     if (!opened || !trigger.current || !popup.current) return;
     const anchor = trigger.current.getBoundingClientRect();
     const bounds = popup.current.getBoundingClientRect();
     setPosition({
-      left: Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)),
+      left: Math.max(8, Math.min(anchorPoint?.x ?? anchor.right - bounds.width, window.innerWidth - bounds.width - 8)),
       top: Math.max(
         8,
-        anchor.bottom + bounds.height + 4 <= window.innerHeight
-          ? anchor.bottom + 4
-          : anchor.top - bounds.height - 4,
+        (anchorPoint?.y ?? anchor.bottom) + bounds.height + 4 <= window.innerHeight
+          ? (anchorPoint?.y ?? anchor.bottom) + 4
+          : (anchorPoint?.y ?? anchor.top) - bounds.height - 4,
       ),
     });
     popup.current.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)')?.focus();
-  }, [opened]);
+  }, [opened, anchorPoint]);
   useEffect(() => {
     if (!opened) return;
     const outside = (event: PointerEvent) => {
@@ -151,7 +158,7 @@ export function ActionMenu({
         aria-haspopup="true"
         aria-expanded={opened}
         active={opened}
-        onClick={() => setOpened(!opened)}
+        onClick={() => { setAnchorPoint(undefined); setOpened(!opened); }}
       >
         {text && (
           <>

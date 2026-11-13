@@ -50,7 +50,7 @@ export function HistoryDialog({
         </div>
         <p class="muted">
           {request.action === 'merge'
-            ? '将目标分支合入当前分支。'
+            ? '将目标分支合入当前分支。Git 会携带不受影响的本地更改；会覆盖本地文件时终止。'
             : request.action === 'rebase'
               ? '在目标分支上重放当前分支的提交，重放后的提交 ID 会改变。'
               : request.action === 'cherry-pick'
@@ -73,9 +73,11 @@ export function HistoryDialog({
               <option value="auto">自动 · 能快进时快进</option>
               <option value="no-ff">始终创建合并提交 · --no-ff</option>
               <option value="ff-only">仅快进 · --ff-only</option>
+              <option value="squash">Squash · 合并更改到暂存区</option>
             </select>
           </label>
         )}
+        {request.action === 'merge' && request.mergeMode === 'squash' && <p class="muted">将合并后的更改放入暂存区，完成后在提交页填写说明并创建提交。出现冲突时先在合并管理器解决并暂存。</p>}
         {commitAction && preview.parents.length > 1 && (
           <label>
             合并提交的主线父节点

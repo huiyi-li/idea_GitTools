@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { lazy, Suspense } from 'preact/compat';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import { version as appVersion } from '../package.json';
 import {
   call,
   readSaved,
@@ -12,6 +13,7 @@ import {
   type Commit,
   type Branch,
   type HistoryAction,
+  type HistoryRequest,
   type Details,
   type DiffTarget,
   type LogPage,
@@ -29,7 +31,8 @@ import { FileHistoryDialog } from './FileHistoryDialog';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
-import { RepositorySidebar } from './RepositorySidebar';
+import { RepositorySidebar, type BranchAction } from './RepositorySidebar';
+import { BranchDialog } from './BranchDialog';
 import { ActionMenu, FileIcon, Icon, Modal, Split, ToolButton } from './ui/controls';
 import { HistoryDialog, historyLabels, type OperationPreview } from './HistoryDialog';
 import { CompareView } from './CompareView';
@@ -176,6 +179,7 @@ export function App() {
   const [showClone, setShowClone] = useState(false);
   const [showRemotes, setShowRemotes] = useState(false);
   const [showManager, setShowManager] = useState(false);
+  const [branchDialog, setBranchDialog] = useState<{ branch: Branch; action: 'rename' | 'delete' } | null>(null);
   const [showWorktrees, setShowWorktrees] = useState(false);
   const [ignorePath, setIgnorePath] = useState<string | null>(null);
   const [hunks, setHunks] = useState<{ path: string; area: 'staged' | 'unstaged' } | null>(null);
@@ -306,6 +310,7 @@ export function App() {
       setShowHosting(false);
       setShowWorktrees(false);
       setIgnorePath(null);
+      setBranchDialog(null);
       setReview(null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
@@ -409,6 +414,7 @@ export function App() {
   function previewHistory(
     action: HistoryAction,
     target: { target: string; hash: string; label: string; parents?: string[] },
+    mergeMode: HistoryRequest['mergeMode'] = 'auto',
   ) {
     const repository = status?.repository;
     if (!repository?.head || !repository.branch || gate.current) return;
@@ -419,7 +425,7 @@ export function App() {
         targetHash: target.hash,
         expectedHead: repository.head,
         expectedBranch: repository.branch,
-        mergeMode: 'auto',
+        mergeMode,
         mainline: null,
       },
       label: target.label,
@@ -427,9 +433,12 @@ export function App() {
     });
   }
 
-  function branchAction(item: Branch, action: 'compare' | 'merge' | 'rebase') {
+  function branchAction(item: Branch, action: BranchAction) {
     if (action === 'compare') setComparisonBranch(item.full);
-    else previewHistory(action, { target: item.full, hash: item.hash, label: item.name });
+    else {
+      const mode = action.startsWith('merge-') ? action.slice(6) as 'ff-only' | 'no-ff' | 'squash' : 'auto';
+      previewHistory(action === 'rebase' ? 'rebase' : 'merge', { target: item.full, hash: item.hash, label: item.name }, mode);
+    }
   }
 
   async function previewNavigation(target: string, action: NavigationAction = 'checkout', creating = false) {
@@ -571,7 +580,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (showHosting || showClone || showRemotes || showManager || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
+      if (showHosting || showClone || showRemotes || showManager || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -593,7 +602,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
 
   function changeView(next: View) {
     setView(next);
@@ -819,7 +828,12 @@ export function App() {
                     setOffset(0);
                   }}
                   onCheckout={(value) => void previewNavigation(value)}
-                  onCreate={() => setDialog({ kind: 'branch', value: '' })}
+                  onCreate={(item) => {
+                    if (status.repository.head) void previewNavigation(item?.full ?? 'HEAD', 'checkout', true);
+                    else setDialog({ kind: 'branch', value: '' });
+                  }}
+                  onManage={() => setShowManager(true)}
+                  onEdit={(branch, action) => setBranchDialog({ branch, action })}
                   onFetch={() => setTransfer('fetch')}
                   onStash={() => setDialog({ kind: 'stash', value: 'Work in progress' })}
                   onApplyStash={(hash) => void mutate('apply_stash', { hash }, '应用 Stash')}
@@ -1150,11 +1164,16 @@ export function App() {
         <button class={showConsole ? 'active' : ''} onClick={() => setShowConsole(!showConsole)}>
           Console
         </button>
-        <span>0.4.0</span>
+        <span>{appVersion}</span>
       </footer>
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
       {showManager && root && <RepositoryManager key={root} root={root} onClose={() => setShowManager(false)} onChanged={() => refresh(root, true)} />}
+      {branchDialog && root && <BranchDialog key={`${root}-${branchDialog.branch.full}-${branchDialog.action}`} root={root} initialBranch={branchDialog.branch} action={branchDialog.action}
+        onClose={() => setBranchDialog(null)} onOpen={path => openPath(path, true)} onChanged={async renamed => {
+          if (branch === branchDialog.branch.full) { setBranch(renamed ?? ''); setOffset(0); }
+          await refresh(root);
+        }} />}
       {showWorktrees && root && <WorktreeDialog key={root} root={root} onClose={() => setShowWorktrees(false)} onChanged={() => refresh(root)} onOpen={path => openPath(path, true)} />}
       {ignorePath !== null && root && <IgnoreDialog key={root} root={root} initialPath={ignorePath} onClose={() => setIgnorePath(null)} onChanged={() => refresh(root)} />}
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
@@ -1195,7 +1214,12 @@ export function App() {
           onClose={() => setOperationDialog(null)}
           onRun={(request) => {
             setOperationDialog(null);
-            void mutate('start_history', { request }, historyLabels[request.action], true);
+            void mutate('start_history', { request }, historyLabels[request.action], true).then(success => {
+              if (success && request.action === 'merge' && request.mergeMode === 'squash') {
+                setView('changes');
+                setMessage(previous => previous || `Squash merge ${request.target.replace(/^refs\/(heads|remotes)\//, '')} into ${request.expectedBranch}`);
+              }
+            });
           }}
         />
       )}

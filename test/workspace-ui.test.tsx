@@ -148,6 +148,29 @@ function fixture(
         return structuredClone(status);
       case 'read_log':
         return { commits: [commit], hasMore: false };
+      case 'read_worktrees':
+        return { head: status.repository.head, branches: status.branches, entries: [{ path: status.repository.root, branch: `refs/heads/${status.repository.branch}`, current: true }] };
+      case 'edit_ref': {
+        const request = args.request;
+        const branch = status.branches.find(item => item.name === request.name)!;
+        if (request.action === 'branch-delete') status.branches = status.branches.filter(item => item !== branch);
+        else {
+          if (branch.current) status.repository.branch = request.newName;
+          branch.name = request.newName;
+          branch.full = `refs/heads/${request.newName}`;
+        }
+        return '';
+      }
+      case 'preview_navigation':
+        return { root: status.repository.root, action: args.action, target: args.target,
+          targetHash: status.branches.find(item => item.full === args.target)?.hash ?? status.repository.head,
+          expectedHead: status.repository.head, expectedBranch: status.repository.branch, fingerprint: 'branch-preview',
+          localBranches: [], remote: false, local: true, suggestedBranch: '', worktreePath: null,
+          changes: [], localChanges: [], untrackedOverwrites: [], leaving: [], leavingCount: 0 };
+      case 'execute_navigation':
+        status.repository.branch = args.request.newBranch ?? args.request.preview.target.replace('refs/heads/', '');
+        status.repository.head = args.request.preview.targetHash;
+        return { completed: true, kind: 'completed', message: '签出完成', blockedFiles: [], record: null };
       case 'commit_details':
         return {
           commit,
@@ -759,7 +782,8 @@ test('branch comparison opens from the branch menu and reads the two immutable s
     await waitFor(() => root.querySelector('.sidebar'));
     button('分支操作 feature').click();
     await waitFor(() => document.querySelector('.action-popup'));
-    assert.equal(button('Merge 到当前分支…').disabled, true, 'dirty worktree disables mutations');
+    assert.equal(button('Merge 到当前分支…').disabled, false, 'native merge can carry unrelated local changes');
+    assert.equal(button('Rebase 当前分支到此处…').disabled, true);
     button('与当前分支比较').click();
     await waitFor(() => root.querySelector('.comparison-dialog .diff-editors'));
     const comparisonCall = calls.find((call) => call.command === 'compare_branch');
@@ -780,6 +804,83 @@ test('branch comparison opens from the branch menu and reads the two immutable s
     assert.equal(calls.filter((call) => call.command === 'start_history').length, 0);
   } finally {
     render(null, root);
+  }
+});
+
+test('right-click branch menus expose deletion and creation from the selected branch', async () => {
+  const calls = fixture(false, { clean: true });
+  try {
+    await waitFor(() => root.querySelector('.sidebar'));
+    const row = [...root.querySelectorAll<HTMLElement>('.branch-line')].find(item => item.textContent?.includes('feature'))!;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 200 }));
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('从此分支新建并签出…').click();
+    await waitFor(() => root.querySelector('[aria-label="新分支名称"]'));
+    const name = root.querySelector<HTMLInputElement>('[aria-label="新分支名称"]')!;
+    name.value = 'from-feature';
+    name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    button('创建并签出分支').click();
+    await waitFor(() => calls.some(call => call.command === 'execute_navigation'));
+    const request = calls.find(call => call.command === 'execute_navigation')!.args.request;
+    assert.equal(request.preview.target, 'refs/heads/feature');
+    assert.equal(request.newBranch, 'from-feature');
+    await waitFor(() => !root.querySelector('.navigation-dialog'));
+    button('分支操作 feature').click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('删除本地分支…').click();
+    await waitFor(() => root.querySelector('[aria-label="删除本地分支"]'));
+    await waitFor(() => !button('确认删除分支').disabled);
+    assert.equal(calls.filter(call => call.command === 'edit_ref').length, 0);
+    button('确认删除分支').click();
+    await waitFor(() => calls.some(call => call.command === 'edit_ref'));
+    const edit = calls.find(call => call.command === 'edit_ref')!.args.request;
+    assert.equal(edit.name, 'feature');
+    assert.equal(edit.hash, 'b'.repeat(40));
+    assert.equal(edit.force, false);
+    await waitFor(() => !root.querySelector('[aria-label="删除本地分支"]'));
+  } finally { render(null, root); }
+});
+
+test('renaming the filtered current branch refreshes the branch label and log scope', async () => {
+  const calls = fixture(false, { clean: true });
+  try {
+    await waitFor(() => root.querySelector('.sidebar'));
+    const item = root.querySelector<HTMLButtonElement>('.current-branch .branch-item')!;
+    item.click();
+    await waitFor(() => calls.some(call => call.command === 'read_log' && call.args.query.branch === 'refs/heads/main'));
+    button('分支操作 main').click();
+    await waitFor(() => document.querySelector('.action-popup'));
+    button('重命名分支…').click();
+    await waitFor(() => root.querySelector('[aria-label="分支新名称"]'));
+    const name = root.querySelector<HTMLInputElement>('[aria-label="分支新名称"]')!;
+    name.value = 'renamed-main';
+    name.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => !button('保存分支名称').disabled);
+    button('保存分支名称').click();
+    await waitFor(() => root.querySelector('.current-branch-chip')?.textContent?.includes('renamed-main'));
+    await waitFor(() => calls.some(call => call.command === 'read_log' && call.args.query.branch === 'refs/heads/renamed-main'));
+    assert.equal(calls.find(call => call.command === 'edit_ref')!.args.request.hash, 'a'.repeat(40));
+  } finally { render(null, root); }
+});
+
+test('branch quick merge entries preselect each native merge mode', async () => {
+  for (const [label, mode] of [['仅快进合并到 main…', 'ff-only'], ['创建合并提交到 main…', 'no-ff'], ['Squash 合并到 main…', 'squash']]) {
+    const calls = fixture(false, { clean: true });
+    try {
+      await waitFor(() => root.querySelector('.sidebar'));
+      button('分支操作 feature').click();
+      await waitFor(() => document.querySelector('.action-popup'));
+      button(label).click();
+      await waitFor(() => root.querySelector('[aria-label="合并方式"]'));
+      assert.equal(root.querySelector<HTMLSelectElement>('[aria-label="合并方式"]')!.value, mode);
+      button('执行 Merge').click();
+      await waitFor(() => calls.some(call => call.command === 'start_history'));
+      const request = calls.find(call => call.command === 'start_history')!.args.request;
+      assert.equal(request.mergeMode, mode);
+      assert.equal(request.target, 'refs/heads/feature');
+      if (mode === 'squash') await waitFor(() => root.querySelector('#commit-message'));
+    } finally { render(null, root); }
   }
 });
 
@@ -899,7 +1000,7 @@ test('branch menus escape scroll containers and support keyboard navigation', as
     assert.equal(root.contains(popup), false);
     assert.equal(document.activeElement, button('签出 feature'));
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-    assert.equal(document.activeElement, button('与当前分支比较'));
+    assert.equal(document.activeElement === button('从此分支新建并签出…'), true);
     document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await waitFor(() => !document.querySelector('.action-popup'));
     assert.equal(document.activeElement, trigger);

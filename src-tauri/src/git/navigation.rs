@@ -355,7 +355,7 @@ impl Git {
                 if field == format!("branch {target}") {
                     let other = Path::new(&directory)
                         .canonicalize()
-                        .map_err(|e| e.to_string())?;
+                        .unwrap_or_else(|_| PathBuf::from(&directory));
                     if other != self.root {
                         worktree_path = Some(git_path(&other));
                     }
@@ -599,13 +599,20 @@ impl Git {
             return Err("HEAD、目标或本地修改已改变，请重新预览后执行".into());
         }
         if let Some(path) = &fresh.worktree_path {
-            return Ok(NavigationResult {
-                completed: false,
-                kind: "worktree".into(),
-                message: format!("分支正在其他 worktree 使用：{path}"),
-                blocked_files: vec![],
-                record: None,
-            });
+            if p.action == NavigationAction::Checkout
+                && request
+                    .new_branch
+                    .as_ref()
+                    .is_none_or(|name| name.is_empty())
+            {
+                return Ok(NavigationResult {
+                    completed: false,
+                    kind: "worktree".into(),
+                    message: format!("分支正在其他 worktree 使用：{path}"),
+                    blocked_files: vec![],
+                    record: None,
+                });
+            }
         }
         let new_branch = request.new_branch.filter(|n| !n.is_empty());
         if let Some(name) = &new_branch {
