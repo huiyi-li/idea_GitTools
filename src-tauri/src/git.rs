@@ -13,6 +13,7 @@ pub(crate) mod history;
 pub(crate) mod hunks;
 pub(crate) mod ignore;
 pub(crate) mod interactive;
+pub(crate) mod local_history;
 mod log;
 pub(crate) mod management;
 pub(crate) mod merge;

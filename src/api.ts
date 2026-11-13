@@ -120,6 +120,20 @@ export interface FileDiff {
   reason?: string;
 }
 
+export interface LocalHistoryEntry {
+  id: string;
+  path: string;
+  timestamp: number;
+  reason: string;
+  size: number;
+  binary: boolean;
+}
+
+export interface LocalHistorySnapshot {
+  entry: LocalHistoryEntry;
+  content: string;
+}
+
 export function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   return invoke<T>(command, args);
 }

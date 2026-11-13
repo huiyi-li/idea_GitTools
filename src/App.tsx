@@ -29,6 +29,7 @@ import { IgnoreDialog } from './IgnoreDialog';
 import { HunkDialog, AmendDialog } from './HunkDialog';
 import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
+import { LocalHistoryDialog } from './LocalHistoryDialog';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
@@ -206,6 +207,7 @@ export function App() {
   const [showAmend, setShowAmend] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
   const [fileHistory, setFileHistory] = useState(false);
+  const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
@@ -350,6 +352,7 @@ export function App() {
       setIgnorePath(null);
       setBranchDialog(null);
       setReview(null);
+      setLocalHistoryPath(null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
@@ -366,6 +369,11 @@ export function App() {
     const next = await call<Status>('repository_status', { root: path });
     if (activeRoot.current === path) {
       setStatus(next);
+      void Promise.allSettled(
+        next.changes
+          .filter((change) => !change.conflict && change.index !== 'D' && change.workTree !== 'D')
+          .map((change) => call('local_history_capture', { root: path, path: change.path, reason: 'Git 工作区刷新' })),
+      );
       setVersion((v) => v + 1);
       setTarget(previous => {
         if (!previous || previous.revision !== null) return previous;
@@ -676,7 +684,7 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (showUpdates) return;
-      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory) return;
+      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -698,7 +706,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, review, showUpdates]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, localHistoryPath, review, showUpdates]);
 
   function changeView(next: View) {
     setView(next);
@@ -778,6 +786,7 @@ export function App() {
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
+            <button onClick={() => setLocalHistoryPath('')}>Local History</button>
             <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
             <button onClick={() => setShowBisect(true)}>Bisect</button>
             <button onClick={() => setShowSubmodules(true)}>Submodule 管理</button>
@@ -1296,7 +1305,7 @@ export function App() {
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
             (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
-              transfer || hunks || showAmend || showInteractive || fileHistory || mergePath !== null || review ||
+              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || mergePath !== null || review ||
               dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
           beforeInstall={() => {
@@ -1336,6 +1345,7 @@ export function App() {
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
       {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
+      {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
       {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={() => refresh(root, true)} />}
 
       {mergePath !== null && (

@@ -177,6 +177,45 @@ async fn read_review_worktree(
 }
 
 #[tauri::command]
+async fn local_history_list(
+    root: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<git::local_history::LocalHistoryEntry>, String> {
+    active(&*state.0.lock().await, &root)?.local_history_list(&path).await
+}
+
+#[tauri::command]
+async fn local_history_capture(
+    root: String,
+    path: String,
+    reason: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.local_history_capture(&path, &reason).await
+}
+
+#[tauri::command]
+async fn local_history_read(
+    root: String,
+    path: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<git::local_history::LocalHistorySnapshot, String> {
+    active(&*state.0.lock().await, &root)?.local_history_read(&id, &path).await
+}
+
+#[tauri::command]
+async fn local_history_restore(
+    root: String,
+    path: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.local_history_restore(&id, &path).await
+}
+
+#[tauri::command]
 async fn stage_paths(
     root: String,
     paths: Vec<String>,
@@ -850,6 +889,10 @@ pub fn run() {
             read_diff,
             read_commit_review,
             read_review_worktree,
+            local_history_list,
+            local_history_capture,
+            local_history_read,
+            local_history_restore,
             stage_paths,
             preview_discard,
             discard_changes,
