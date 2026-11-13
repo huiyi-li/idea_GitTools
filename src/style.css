@@ -1209,6 +1209,10 @@ input[type='checkbox'] {
 .hunk-list { max-height: 55vh; overflow: auto; }
 .hunk-item { border: 1px solid var(--border); margin: 10px 0; padding: 8px; }
 .hunk-item pre { overflow: auto; margin: 0; white-space: pre; }
+.hunk-line-editor { margin: 10px 0; border: 1px solid var(--border); }
+.hunk-checkboxes input[type="checkbox"] { width: 14px; height: 14px; margin: 0; vertical-align: middle; }
+.hunk-addition { background: #258b3522; }
+.hunk-deletion { background: #d43b3b22; }
 .blame-table { border-collapse: collapse; width: 100%; }
 .blame-table td { padding: 2px 8px; vertical-align: top; white-space: nowrap; }
 .blame-table pre { margin: 0; }

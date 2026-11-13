@@ -615,7 +615,7 @@ fn checked_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn stamp(path: &Path) -> Result<String, String> {
+pub(super) fn stamp(path: &Path) -> Result<String, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok("missing".into()),
@@ -641,7 +641,11 @@ fn stamp(path: &Path) -> Result<String, String> {
     ))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], expected: Option<&str>) -> Result<(), String> {
+pub(super) fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    expected: Option<&str>,
+) -> Result<(), String> {
     let mut temp =
         NamedTempFile::new_in(path.parent().ok_or("文件路径错误")?).map_err(|e| e.to_string())?;
     if let Ok(metadata) = fs::metadata(path) {

@@ -115,7 +115,7 @@ function ChangeList({
               {unstage && <button onClick={() => onStage?.([change], true)}>取消暂存</button>}
               {onHunks && (
                 <button onClick={() => onHunks(change, unstage ? 'staged' : 'unstaged')}>
-                  {unstage ? '按块取消暂存…' : '按块暂存…'}
+                  {unstage ? '按块／按行取消暂存…' : '按块／按行暂存…'}
                 </button>
               )}
               <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>

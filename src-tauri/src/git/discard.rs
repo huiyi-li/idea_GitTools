@@ -47,7 +47,7 @@ fn entries(bytes: &[u8]) -> Result<BTreeMap<String, String>, String> {
         .collect()
 }
 
-fn checked_path(root: &Path, path: &str) -> Result<PathBuf, String> {
+pub(super) fn checked_path(root: &Path, path: &str) -> Result<PathBuf, String> {
     validate_path(path)?;
     let absolute = root.join(path);
     let mut parent = absolute.parent();

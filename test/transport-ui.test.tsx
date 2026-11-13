@@ -353,6 +353,32 @@ test('hunk staging uses the reviewed preview and reports a clean file after the 
   }
 });
 
+test('selected diff lines use the pinned preview and require confirmation before discarding', async () => {
+  const preview = { path: 'file.txt', area: 'unstaged', fingerprint: 'lines', header: 'header', hunks: ['@@ -1 +1 @@\n-old\n+new\n'] };
+  let applied: any;
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'preview_hunks') return applied ? { ...preview, hunks: [] } : preview;
+    if (command === 'apply_hunk_lines') { applied = args; return; }
+    throw Error(command);
+  };
+  render(<HunkDialog root="C:/repo" path="file.txt" area="unstaged" onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.querySelector('[aria-label="选择变化行 3"]'));
+    const checkbox = host.querySelector<HTMLInputElement>('[aria-label="选择变化行 3"]')!;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => !button('放弃选中行…').disabled);
+    button('放弃选中行…').click();
+    await waitFor(() => host.textContent?.includes('确认将选中的 1 个变化行'));
+    assert.equal(applied, undefined);
+    button('确认放弃选中行').click();
+    await waitFor(() => applied);
+    assert.deepEqual(applied.selections, [{ hunk: 0, lines: [2] }]);
+    assert.deepEqual(applied.preview, preview);
+    assert.equal(applied.discard, true);
+  } finally { render(null, host); }
+});
+
 test('amend requires confirmation and pins both HEAD and the staged snapshot', async () => {
   let request: any;
   (globalThis as any).testBackend = async (command: string, args: any) => {

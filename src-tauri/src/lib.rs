@@ -542,6 +542,19 @@ async fn apply_hunk(
         .apply_hunk(preview, index, discard)
         .await
 }
+
+#[tauri::command]
+async fn apply_hunk_lines(
+    root: String,
+    preview: git::hunks::HunkPreview,
+    selections: Vec<git::hunks::lines::LineSelection>,
+    discard: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .apply_hunk_lines(preview, selections, discard)
+        .await
+}
 #[tauri::command]
 async fn preview_amend(
     root: String,
@@ -699,6 +712,7 @@ pub fn run() {
             edit_worktree,
             prune_worktrees,
             apply_hunk,
+            apply_hunk_lines,
             preview_amend,
             amend_commit,
             preview_interactive,

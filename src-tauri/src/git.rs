@@ -195,7 +195,9 @@ impl Git {
             let (stdout, stderr, status, ()) = tokio::try_join!(
                 read_with_limit(
                     stdout,
-                    if args.starts_with(&["cat-file", "blob"]) {
+                    if args.starts_with(&["cat-file", "blob"])
+                        || args.starts_with(&["cat-file", "--filters"])
+                    {
                         content::MAX_LARGE_FILE
                     } else {
                         MAX_OUTPUT

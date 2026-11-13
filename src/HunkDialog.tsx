@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { call, type Change } from './api';
 import { Modal } from './ui/controls';
+import { HunkLineEditor, changedLine } from './HunkLineEditor';
 
 interface Preview {
   path: string;
@@ -27,10 +28,16 @@ export function HunkDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [discard, setDiscard] = useState<number | null>(null);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<Record<number, number[]>>({});
+  const [discardLines, setDiscardLines] = useState(false);
   async function load() {
     setPreview(await call<Preview>('preview_hunks', { root, path, area }));
     setError('');
     setDiscard(null);
+    setSelected({});
+    setIndex(0);
+    setDiscardLines(false);
   }
   useEffect(() => {
     void load().catch((error) => setError(String(error)));
@@ -51,21 +58,47 @@ export function HunkDialog({
       setBusy(false);
     }
   }
+  async function applyLines(discard: boolean) {
+    if (!preview || busy) return;
+    const selections = Object.entries(selected).filter(([, lines]) => lines.length).map(([hunk, lines]) => ({ hunk: Number(hunk), lines }));
+    if (!selections.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      await call('apply_hunk_lines', { root, preview, selections, discard });
+      await onChanged();
+      await load();
+    } catch (error) {
+      setPreview(undefined);
+      setError(String(error));
+      await onChanged().catch(error => setError(String(error)));
+    } finally { setBusy(false); }
+  }
+  const count = Object.values(selected).reduce((sum, lines) => sum + lines.length, 0);
   return (
     <Modal
-      title="按块处理更改"
+      title="按块与按行处理更改"
       busy={busy}
       onClose={onClose}
       class="history-dialog workflow-dialog"
     >
       <h2>
-        {area === 'staged' ? '按块取消暂存' : '按块暂存'} · {path}
+        {area === 'staged' ? '按块／按行取消暂存' : '按块／按行暂存'} · {path}
       </h2>
       <div class="hunk-list">
-        {preview?.hunks.map((hunk, index) => (
-          <section key={index} class="hunk-item">
-            <pre>{hunk}</pre>
+        {!!preview?.hunks.length && (
+          <section class="hunk-item">
+            <label>变化块<select aria-label="选择变化块" disabled={busy} value={index} onChange={event => { setIndex(Number(event.currentTarget.value)); setDiscard(null); setDiscardLines(false); }}>
+              {preview.hunks.map((hunk, index) => <option key={index} value={index}>{index + 1} / {preview.hunks.length} · {hunk.split('\n')[0]}</option>)}
+            </select></label>
+            <HunkLineEditor text={preview.hunks[index]} selected={selected[index] ?? []} disabled={busy}
+              onToggle={line => { setDiscardLines(false); setSelected(previous => {
+                const lines = previous[index] ?? [];
+                return { ...previous, [index]: lines.includes(line) ? lines.filter(value => value !== line) : [...lines, line] };
+              }); }}
+              onSelect={lines => { setDiscardLines(false); setSelected(previous => ({ ...previous, [index]: [...new Set([...(previous[index] ?? []), ...lines])] })); }} />
             <div class="modal-actions">
+              <button disabled={busy} onClick={() => { setDiscardLines(false); setSelected(previous => ({ ...previous, [index]: preview.hunks[index].split('\n').flatMap((line, index) => changedLine(line) ? [index] : []) })); }}>选择此块全部变化行</button>
               <button disabled={busy} onClick={() => void apply(index, false)}>
                 {area === 'staged' ? '取消暂存此块' : '暂存此块'}
               </button>
@@ -87,9 +120,22 @@ export function HunkDialog({
               )}
             </div>
           </section>
-        ))}
+        )}
         {preview && !preview.hunks.length && <p>没有可处理的文本变化块，可使用整文件操作。</p>}
       </div>
+      {!!preview?.hunks.length && <>
+        <p>已选 {count} 个变化行。新增行与删除行可分别选择，替换一行时可同时勾选对应的 − 和 + 行。</p>
+        <div class="modal-actions">
+          <button disabled={busy || !count} onClick={() => void applyLines(false)}>{area === 'staged' ? '取消暂存选中行' : '暂存选中行'}</button>
+          <button disabled={busy || !count} onClick={() => { setSelected({}); setDiscardLines(false); }}>清除行选择</button>
+          {area === 'unstaged' && <button disabled={busy || !count} onClick={() => { setDiscard(null); setDiscardLines(true); }}>放弃选中行…</button>}
+        </div>
+        {discardLines && <div class="confirmation">
+          <p>确认将选中的 {count} 个变化行恢复到暂存区版本？选中新增文件的全部行会删除该文件。</p>
+          <button disabled={busy || !count} onClick={() => void applyLines(true)}>确认放弃选中行</button>
+          <button disabled={busy} onClick={() => setDiscardLines(false)}>取消</button>
+        </div>}
+      </>}
       {error && (
         <p class="error-text" role="alert">
           {error}
