@@ -286,7 +286,11 @@ async fn branch_status_reports_ahead_and_behind_counts() {
     git.stage(vec!["file.txt".into()], false).await.unwrap();
     git.commit("ahead").await.unwrap();
     let status = git.status().await.unwrap();
-    let main = status.branches.iter().find(|branch| branch.current).unwrap();
+    let main = status
+        .branches
+        .iter()
+        .find(|branch| branch.current)
+        .unwrap();
     assert_eq!((main.ahead, main.behind), (1, 0));
 
     let other = tempfile::tempdir().unwrap();
@@ -311,7 +315,11 @@ async fn branch_status_reports_ahead_and_behind_counts() {
     run(other.path(), &["push"]);
     git.remote_action("fetch").await.unwrap();
     let status = git.status().await.unwrap();
-    let main = status.branches.iter().find(|branch| branch.current).unwrap();
+    let main = status
+        .branches
+        .iter()
+        .find(|branch| branch.current)
+        .unwrap();
     assert_eq!((main.ahead, main.behind), (1, 1));
 }
 
