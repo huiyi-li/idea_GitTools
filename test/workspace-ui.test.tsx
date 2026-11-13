@@ -37,6 +37,7 @@ after(() => window.happyDOM.close());
 
 const { App } = await import('../src/App');
 const { DiagnosticsDialog } = await import('../src/DiagnosticsDialog');
+const { BisectDialog } = await import('../src/BisectDialog');
 const { Split } = await import('../src/ui/controls');
 const root = document.body.appendChild(document.createElement('div'));
 
@@ -310,6 +311,23 @@ test('Git diagnostics shows read-only repository state', async () => {
     assert.ok(calls.some(call => call.command === 'git_diagnostics'), `diagnostics call missing: ${calls.map(call => call.command).join(',')}`);
     assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('git version 2.53.0'));
     assert.ok(document.querySelector('.diagnostics-grid')?.textContent?.includes('origin'));
+  } finally { render(null, root); }
+});
+
+test('Git Bisect shows the active commit and sends a result action', async () => {
+  const calls = fixture();
+  globalThis.testBackend = async (command: string, args: any) => {
+    calls.push({ command, args: structuredClone(args) });
+    if (command === 'bisect_status') return { active: true, start: 'main', current: 'a'.repeat(40), log: ['git bisect bad'] };
+    if (command === 'bisect_step') return '';
+    throw new Error(command);
+  };
+  try {
+    render(<BisectDialog root="C:/fixture" onClose={() => {}} onChanged={async () => {}} />, root);
+    await waitFor(() => root.textContent?.includes('Current:'));
+    button('Good').click();
+    await waitFor(() => calls.some(call => call.command === 'bisect_step'));
+    assert.equal(calls.find(call => call.command === 'bisect_step')!.args.action, 'good');
   } finally { render(null, root); }
 });
 

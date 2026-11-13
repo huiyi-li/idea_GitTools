@@ -78,6 +78,26 @@ async fn git_diagnostics(root: String, state: State<'_, AppState>) -> Result<Dia
 }
 
 #[tauri::command]
+async fn bisect_status(root: String, state: State<'_, AppState>) -> Result<BisectStatus, String> {
+    active(&*state.0.lock().await, &root)?.bisect_status().await
+}
+
+#[tauri::command]
+async fn bisect_start(root: String, bad: String, good: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.bisect_start(&bad, &good).await
+}
+
+#[tauri::command]
+async fn bisect_step(root: String, action: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.bisect_step(&action).await
+}
+
+#[tauri::command]
+async fn bisect_reset(root: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?.bisect_reset().await
+}
+
+#[tauri::command]
 async fn read_log(
     root: String,
     query: LogQuery,
@@ -809,6 +829,10 @@ pub fn run() {
             open_repository,
             repository_status,
             git_diagnostics,
+            bisect_status,
+            bisect_start,
+            bisect_step,
+            bisect_reset,
             read_log,
             commit_details,
             read_diff,

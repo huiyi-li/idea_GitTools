@@ -171,6 +171,26 @@ async fn unstage_selected_rename_clears_both_index_paths() {
 }
 
 #[tokio::test]
+async fn bisect_can_start_report_and_reset_without_leaking_remote_data() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    fs::write(dir.path().join("file.txt"), "good\n").unwrap();
+    git.stage(vec!["file.txt".into()], false).await.unwrap();
+    git.commit("good").await.unwrap();
+    let good = git.repository().await.unwrap().head.unwrap();
+    fs::write(dir.path().join("file.txt"), "bad\n").unwrap();
+    git.stage(vec!["file.txt".into()], false).await.unwrap();
+    git.commit("bad").await.unwrap();
+    let bad = git.repository().await.unwrap().head.unwrap();
+    git.bisect_start(&bad, &good).await.unwrap();
+    let status = git.bisect_status().await.unwrap();
+    assert!(status.active);
+    assert_eq!(status.start.as_deref(), Some("main"));
+    git.bisect_reset().await.unwrap();
+    assert!(!git.bisect_status().await.unwrap().active);
+}
+
+#[tokio::test]
 async fn diagnostics_reports_repository_state_without_remote_urls() {
     let dir = fixture();
     let git = open(&dir).await;

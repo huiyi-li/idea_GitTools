@@ -47,6 +47,15 @@ pub struct Status {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BisectStatus {
+    pub active: bool,
+    pub start: Option<String>,
+    pub current: Option<String>,
+    pub log: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     pub git_version: String,
     pub root: String,

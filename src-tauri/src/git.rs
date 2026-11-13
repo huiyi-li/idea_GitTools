@@ -263,6 +263,79 @@ impl Git {
         Ok((head.code == 0).then(|| String::from_utf8_lossy(&head.stdout).trim().to_owned()))
     }
 
+    pub async fn bisect_status(&self) -> Result<BisectStatus, String> {
+        let git_dir = PathBuf::from(
+            self.text(&["rev-parse", "--absolute-git-dir"])
+                .await?
+                .trim(),
+        );
+        let start = std::fs::read_to_string(git_dir.join("BISECT_START"))
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        let active = start.is_some() || git_dir.join("BISECT_HEAD").exists();
+        let current = if active { self.head().await? } else { None };
+        let log = if active {
+            self.execute(&["bisect", "log"], None)
+                .await
+                .ok()
+                .filter(|output| output.code == 0)
+                .map(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_owned)
+                        .take(40)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        Ok(BisectStatus {
+            active,
+            start,
+            current,
+            log,
+        })
+    }
+
+    pub async fn bisect_start(&self, bad: &str, good: &str) -> Result<(), String> {
+        validate_hash(bad)?;
+        validate_hash(good)?;
+        if bad == good {
+            return Err("Bad and good commits must differ.".into());
+        }
+        let status = self.status().await?;
+        if status.repository.operation != "none" || !status.changes.is_empty() {
+            return Err("Commit or clear local changes before starting Bisect.".into());
+        }
+        if self.bisect_status().await?.active {
+            return Err("Bisect is already active.".into());
+        }
+        self.bytes(&["bisect", "start", bad, good]).await?;
+        Ok(())
+    }
+
+    pub async fn bisect_step(&self, action: &str) -> Result<(), String> {
+        if !matches!(action, "good" | "bad" | "skip") {
+            return Err("Invalid Bisect result.".into());
+        }
+        if !self.bisect_status().await?.active {
+            return Err("Bisect is not active.".into());
+        }
+        self.bytes(&["bisect", action]).await?;
+        Ok(())
+    }
+
+    pub async fn bisect_reset(&self) -> Result<(), String> {
+        if self.bisect_status().await?.active {
+            self.bytes(&["bisect", "reset"]).await?;
+        }
+        Ok(())
+    }
+
     pub async fn diagnostics(&self) -> Result<Diagnostics, String> {
         let status = self.status().await?;
         let git_dir = self
