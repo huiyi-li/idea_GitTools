@@ -59,7 +59,9 @@ export function BranchDialog({ root, initialBranch, action, onClose, onChanged, 
   const title = action === 'rename' ? '重命名分支' : initialBranch.remote ? '删除远程分支' : '删除本地分支';
   if (job) return <Modal title="删除远程分支" busy={!transportIdle} onClose={onClose} class="transport-dialog">
     <h2>删除远程分支 · {initialBranch.name}</h2>
-    <TransportProgress id={job} onIdle={setTransportIdle} onFinished={() => onChanged(initialBranch.full)} onDone={async () => { await onChanged(); onClose(); }} />
+    <TransportProgress id={job} onIdle={setTransportIdle}
+      onFinished={async state => { if (state !== 'done') await onChanged(initialBranch.full); }}
+      onDone={async () => { await onChanged(); onClose(); }} />
     <div class="modal-actions"><button disabled={!transportIdle} onClick={onClose}>关闭</button></div>
   </Modal>;
   return <Modal title={title} busy={busy} onClose={onClose} class="transport-dialog">

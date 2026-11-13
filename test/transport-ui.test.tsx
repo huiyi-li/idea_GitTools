@@ -442,6 +442,23 @@ test('selected diff lines use the pinned preview and require confirmation before
   } finally { render(null, host); }
 });
 
+test('large selectable hunks keep their DOM bounded to the editor viewport', async () => {
+  const text = '@@ -0,0 +1,50000 @@\n' + Array.from({ length: 50_000 }, (_, index) => `+line ${index}\n`).join('');
+  (globalThis as any).testBackend = async (command: string) => {
+    if (command === 'preview_hunks') return { path: 'large.txt', area: 'unstaged', fingerprint: 'large', header: '', hunks: [text] };
+    throw Error(command);
+  };
+  render(<HunkDialog root="C:/repo" path="large.txt" area="unstaged" onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.querySelector('.hunk-line-editor .cm-line'));
+    assert.ok(host.querySelectorAll('.hunk-line-editor .cm-line').length < 500);
+    assert.ok(host.querySelectorAll('.hunk-line-editor input[type="checkbox"]').length < 500);
+    button('选择此块全部变化行').click();
+    await waitFor(() => host.textContent?.includes('已选 50000 个变化行'));
+    assert.ok(host.querySelectorAll('.hunk-line-editor input[type="checkbox"]').length < 500);
+  } finally { render(null, host); }
+});
+
 test('amend requires confirmation and pins both HEAD and the staged snapshot', async () => {
   let request: any;
   (globalThis as any).testBackend = async (command: string, args: any) => {

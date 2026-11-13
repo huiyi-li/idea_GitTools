@@ -26,7 +26,7 @@ export function TransportProgress({
   id: string;
   onDone: (directory: string) => void | Promise<void>;
   onIdle: (idle: boolean) => void;
-  onFinished?: () => Promise<void>;
+  onFinished?: (state: Progress['state']) => Promise<void>;
 }) {
   const [progress, setProgress] = useState<Progress>();
   const [error, setError] = useState('');
@@ -52,7 +52,7 @@ export function TransportProgress({
           callbacks.current.onIdle(true);
           if (!done.current) {
             done.current = true;
-            await callbacks.current.onFinished?.();
+            await callbacks.current.onFinished?.(next.state);
             if (next.state === 'done') await callbacks.current.onDone(next.directory);
           }
         }
