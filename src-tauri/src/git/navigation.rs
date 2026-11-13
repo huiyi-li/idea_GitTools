@@ -234,7 +234,7 @@ impl Git {
             .await
     }
 
-    async fn resolve_commit(&self, target: &str) -> Result<String, String> {
+    pub(super) async fn resolve_commit(&self, target: &str) -> Result<String, String> {
         if target.is_empty()
             || target.starts_with('-')
             || target.len() > 1024

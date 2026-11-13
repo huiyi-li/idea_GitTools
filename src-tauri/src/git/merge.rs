@@ -584,7 +584,16 @@ impl Git {
             return Err("请先解决并暂存所有冲突文件".into());
         }
         let option = format!("--{action}");
-        self.execute_with_env(&[&operation, &option], None, &[("GIT_EDITOR", "true")])
+        let environment = if operation == "rebase" {
+            self.interactive_environment().await?
+        } else {
+            vec![("GIT_EDITOR".into(), "true".into())]
+        };
+        let environment: Vec<_> = environment
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        self.execute_with_env(&[&operation, &option], None, &environment)
             .await?
             .checked()?;
         self.merge_session = None;
@@ -712,7 +721,12 @@ impl IndexTransaction {
             .write(true)
             .create_new(true)
             .open(&lock)
-            .map_err(|e| format!("无法锁定 Git 暂存区，请等待其他 Git 操作完成。{e}"))?;
+            .map_err(|e| {
+                format!(
+                    "无法锁定 Git 文件 {}，请等待其他 Git 操作完成。{e}",
+                    index.display()
+                )
+            })?;
         let temporary = match NamedTempFile::new_in(index.parent().ok_or("索引路径错误")?) {
             Ok(file) => file,
             Err(e) => {

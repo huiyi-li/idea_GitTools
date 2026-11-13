@@ -1,6 +1,7 @@
 mod git;
 mod hosting;
 mod models;
+pub mod transport;
 mod watcher;
 
 use git::discard::{DiscardMode, DiscardPreview};
@@ -20,7 +21,7 @@ use tokio::sync::Mutex;
 // One active repository and one operation at a time. A queued request carries its
 // repository root, so switching repositories cannot redirect a pending write.
 #[derive(Default)]
-struct AppState(Mutex<Option<Git>>);
+struct AppState(std::sync::Arc<Mutex<Option<Git>>>);
 
 fn active<'a>(git: &'a Option<Git>, root: &str) -> Result<&'a Git, String> {
     git.as_ref()
@@ -363,6 +364,266 @@ async fn create_recovery_branch(
         .await
 }
 
+#[tauri::command]
+async fn transfer_overview(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<git::remotes::TransferOverview, String> {
+    active(&*state.0.lock().await, &root)?
+        .transfer_overview()
+        .await
+}
+#[tauri::command]
+async fn edit_remote(
+    root: String,
+    request: git::remotes::RemoteEdit,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_remote(request)
+        .await
+}
+#[tauri::command]
+async fn outgoing_commits(
+    root: String,
+    remote: String,
+    branch: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<Commit>, String> {
+    active(&*state.0.lock().await, &root)?
+        .outgoing(&remote, &branch)
+        .await
+}
+#[tauri::command]
+async fn start_transfer(
+    root: String,
+    request: git::remotes::TransferRequest,
+    state: State<'_, AppState>,
+    jobs: State<'_, transport::Jobs>,
+) -> Result<String, String> {
+    let current = state.0.clone().lock_owned().await;
+    let command = active(&current, &root)?.transfer_command(request).await?;
+    jobs.start_with_lease(command, root, Some(current))
+}
+
+#[tauri::command]
+async fn repository_management(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<git::management::Management, String> {
+    active(&*state.0.lock().await, &root)?.management().await
+}
+#[tauri::command]
+async fn edit_ref(
+    root: String,
+    request: git::management::RefEdit,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_ref(request)
+        .await
+}
+#[tauri::command]
+async fn edit_stash(
+    root: String,
+    request: git::management::StashEdit,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_stash(request)
+        .await
+}
+#[tauri::command]
+async fn stash_files(
+    root: String,
+    hash: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<git::management::StashFile>, String> {
+    active(&*state.0.lock().await, &root)?
+        .stash_files(&hash)
+        .await
+}
+#[tauri::command]
+async fn push_tag(
+    root: String,
+    name: String,
+    hash: String,
+    remote: String,
+    state: State<'_, AppState>,
+    jobs: State<'_, transport::Jobs>,
+) -> Result<String, String> {
+    let current = state.0.clone().lock_owned().await;
+    let command = active(&current, &root)?
+        .tag_push_command(&name, &hash, &remote)
+        .await?;
+    jobs.start_with_lease(command, root, Some(current))
+}
+
+#[tauri::command]
+async fn delete_remote_ref(
+    root: String,
+    remote: String,
+    name: String,
+    kind: String,
+    hash: String,
+    state: State<'_, AppState>,
+    jobs: State<'_, transport::Jobs>,
+) -> Result<String, String> {
+    let current = state.0.clone().lock_owned().await;
+    let command = active(&current, &root)?
+        .delete_remote_ref_command(&remote, &name, &kind, &hash)
+        .await?;
+    jobs.start_with_lease(command, root, Some(current))
+}
+
+#[tauri::command]
+async fn preview_hunks(
+    root: String,
+    path: String,
+    area: String,
+    state: State<'_, AppState>,
+) -> Result<git::hunks::HunkPreview, String> {
+    active(&*state.0.lock().await, &root)?
+        .preview_hunks(&path, &area)
+        .await
+}
+#[tauri::command]
+async fn apply_hunk(
+    root: String,
+    preview: git::hunks::HunkPreview,
+    index: usize,
+    discard: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .apply_hunk(preview, index, discard)
+        .await
+}
+#[tauri::command]
+async fn preview_amend(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<git::hunks::AmendPreview, String> {
+    active(&*state.0.lock().await, &root)?.preview_amend().await
+}
+#[tauri::command]
+async fn amend_commit(
+    root: String,
+    expected_head: String,
+    fingerprint: String,
+    message: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .amend(&expected_head, &fingerprint, &message)
+        .await
+}
+
+pub fn git_editor_helper() -> bool {
+    git::interactive::editor_helper()
+}
+
+#[tauri::command]
+async fn preview_interactive(
+    root: String,
+    base: String,
+    onto: String,
+    state: State<'_, AppState>,
+) -> Result<git::interactive::RebasePreview, String> {
+    active(&*state.0.lock().await, &root)?
+        .preview_interactive(&base, &onto)
+        .await
+}
+#[tauri::command]
+async fn start_interactive(
+    root: String,
+    preview: git::interactive::RebasePreview,
+    entries: Vec<git::interactive::RebaseEntry>,
+    state: State<'_, AppState>,
+    jobs: State<'_, transport::Jobs>,
+) -> Result<String, String> {
+    let current = state.0.clone().lock_owned().await;
+    let command = active(&current, &root)?
+        .interactive_command(preview, entries)
+        .await?;
+    jobs.start_with_lease(command, root, Some(current))
+}
+
+#[tauri::command]
+async fn file_history(
+    root: String,
+    path: String,
+    revision: Option<String>,
+    offset: usize,
+    state: State<'_, AppState>,
+) -> Result<git::file_history::FileHistory, String> {
+    active(&*state.0.lock().await, &root)?
+        .file_history(&path, revision.as_deref(), offset)
+        .await
+}
+#[tauri::command]
+async fn file_blame(
+    root: String,
+    path: String,
+    revision: Option<String>,
+    offset: usize,
+    state: State<'_, AppState>,
+) -> Result<git::file_history::BlamePage, String> {
+    active(&*state.0.lock().await, &root)?
+        .blame(&path, revision.as_deref(), offset)
+        .await
+}
+
+#[derive(serde::Serialize)]
+struct ReviewFetch {
+    id: String,
+    reference: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewFetchRequest {
+    account_id: String,
+    repository: String,
+    number: u64,
+    head_sha: String,
+    protocol: String,
+    ssh_alias: String,
+}
+
+#[tauri::command]
+async fn fetch_review_branch(
+    root: String,
+    request: ReviewFetchRequest,
+    state: State<'_, AppState>,
+    hosting: State<'_, hosting::Hosting>,
+    jobs: State<'_, transport::Jobs>,
+) -> Result<ReviewFetch, String> {
+    let current = state.0.clone().lock_owned().await;
+    let git = active(&current, &root)?;
+    let (url, source, reference) = hosting::commands::review_fetch_source(
+        request.account_id,
+        request.repository,
+        request.number,
+        request.head_sha,
+        request.protocol,
+        request.ssh_alias,
+        hosting,
+    )
+    .await?;
+    let mut command = tokio::process::Command::new("git");
+    command.current_dir(&git.root).args([
+        "fetch",
+        "--progress",
+        "--no-tags",
+        "--",
+        &url,
+        &format!("{source}:{reference}"),
+    ]);
+    let id = jobs.start_with_lease(command, root, Some(current))?;
+    Ok(ReviewFetch { id, reference })
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -373,7 +634,31 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState::default())
+        .manage(transport::Jobs::default())
         .invoke_handler(tauri::generate_handler![
+            transport::start_clone,
+            transport::transport_progress,
+            transport::cancel_transport,
+            transport::answer_transport,
+            transfer_overview,
+            edit_remote,
+            outgoing_commits,
+            start_transfer,
+            repository_management,
+            edit_ref,
+            edit_stash,
+            stash_files,
+            push_tag,
+            delete_remote_ref,
+            preview_hunks,
+            apply_hunk,
+            preview_amend,
+            amend_commit,
+            preview_interactive,
+            start_interactive,
+            file_history,
+            file_blame,
+            fetch_review_branch,
             initial_repository,
             open_repository,
             repository_status,
@@ -419,6 +704,8 @@ pub fn run() {
             hosting::commands::hosting_comment,
             hosting::commands::hosting_local_root,
             hosting::commands::hosting_clone,
+            hosting::commands::hosting_review_mutation,
+            hosting::commands::hosting_start_clone,
             hosting::commands::hosting_open_url
         ])
         .run(tauri::generate_context!())

@@ -3,6 +3,68 @@ use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
+pub(crate) async fn hosting_threads(
+    account_id: String,
+    repository: String,
+    number: u64,
+    cursor: String,
+    state: State<'_, Hosting>,
+) -> Result<super::review_actions::Threads, String> {
+    let _permit = state.permit().await?;
+    state
+        .session(account_id)
+        .await?
+        .threads(&repository, number, &cursor)
+        .await
+}
+
+pub(crate) async fn review_fetch_source(
+    account_id: String,
+    repository: String,
+    number: u64,
+    head_sha: String,
+    protocol: String,
+    ssh_alias: String,
+    state: State<'_, Hosting>,
+) -> Result<(String, String, String), String> {
+    let _permit = state.permit().await?;
+    let api = state.session(account_id).await?;
+    let review = api.review(&repository, number).await?;
+    if review.head_sha != head_sha
+        || head_sha.is_empty()
+        || !head_sha.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err("请求 HEAD 已改变，请刷新后签出".into());
+    }
+    let repository = api.repository(&repository).await?;
+    let url = super::clone::clone_url(&repository, &protocol, &ssh_alias)?;
+    let (source, provider) = if api.provider == Provider::Github {
+        (format!("refs/pull/{number}/head"), "github")
+    } else {
+        (format!("refs/merge-requests/{number}/head"), "gitlab")
+    };
+    Ok((
+        url,
+        source,
+        format!("refs/ideagittool/reviews/{provider}/{number}/{head_sha}"),
+    ))
+}
+#[tauri::command]
+pub(crate) async fn hosting_review_mutation(
+    account_id: String,
+    repository: String,
+    request: super::review_actions::ReviewMutation,
+    state: State<'_, Hosting>,
+) -> Result<(), String> {
+    let _permit = state.permit().await?;
+    state
+        .session(account_id)
+        .await?
+        .mutate_review(&repository, request)
+        .await
+}
+
+#[tauri::command]
 pub async fn hosting_accounts(state: State<'_, Hosting>) -> Result<Vec<Account>, String> {
     let store = state.store.clone();
     tokio::task::spawn_blocking(move || store.list())
@@ -252,6 +314,25 @@ pub async fn hosting_open_url(
     app.opener()
         .open_url(target.as_str(), None::<&str>)
         .map_err(|_| "打开浏览器失败".into())
+}
+
+#[tauri::command]
+pub async fn hosting_start_clone(
+    request: CloneRequest,
+    state: State<'_, Hosting>,
+    jobs: State<'_, crate::transport::Jobs>,
+) -> Result<String, String> {
+    let _permit = state.permit().await?;
+    let api = state.session(request.account_id.clone()).await?;
+    let repository = api.repository(&request.repository).await?;
+    let url = super::clone::clone_url(&repository, &request.protocol, request.ssh_alias.trim())?;
+    let (command, directory) = crate::transport::clone_command(crate::transport::CloneRequest {
+        url,
+        parent: request.parent,
+        directory: request.directory,
+        depth: None,
+    })?;
+    jobs.start(command, directory)
 }
 
 #[tauri::command]

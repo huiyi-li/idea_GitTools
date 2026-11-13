@@ -18,6 +18,12 @@ import {
   type Status,
 } from './api';
 import { DiffView } from './DiffView';
+import { CloneDialog } from './TransportDialog';
+import { RemoteDialog, TransferDialog } from './RemoteDialog';
+import { RepositoryManager } from './RepositoryManager';
+import { HunkDialog, AmendDialog } from './HunkDialog';
+import { InteractiveRebase } from './InteractiveRebase';
+import { FileHistoryDialog } from './FileHistoryDialog';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { RepositorySidebar } from './RepositorySidebar';
@@ -42,6 +48,7 @@ function ChangeList({
   onSelect,
   onOpen,
   onStage,
+  onHunks,
   onDiscard,
   unstage,
   busy,
@@ -51,6 +58,7 @@ function ChangeList({
   onSelect: (change: Change) => void;
   onOpen?: (change: Change) => void;
   onStage?: (changes: Change[], unstage: boolean) => void;
+  onHunks?: (change: Change, area: 'staged' | 'unstaged') => void;
   onDiscard?: (changes: Change[], mode: DiscardMode) => void;
   unstage?: boolean;
   busy: boolean;
@@ -103,6 +111,11 @@ function ChangeList({
                 <button onClick={() => onDiscard([change], 'unstaged')}>放弃未暂存更改…</button>
               )}
               {unstage && <button onClick={() => onStage?.([change], true)}>取消暂存</button>}
+              {onHunks && (
+                <button onClick={() => onHunks(change, unstage ? 'staged' : 'unstaged')}>
+                  {unstage ? '按块取消暂存…' : '按块暂存…'}
+                </button>
+              )}
               <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
             </ActionMenu>
           )}
@@ -152,6 +165,14 @@ export function App() {
   const [comparisonBranch, setComparisonBranch] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
   const [showHosting, setShowHosting] = useState(false);
+  const [showClone, setShowClone] = useState(false);
+  const [showRemotes, setShowRemotes] = useState(false);
+  const [showManager, setShowManager] = useState(false);
+  const [hunks, setHunks] = useState<{ path: string; area: 'staged' | 'unstaged' } | null>(null);
+  const [showAmend, setShowAmend] = useState(false);
+  const [showInteractive, setShowInteractive] = useState(false);
+  const [fileHistory, setFileHistory] = useState(false);
+  const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
   const [mergePath, setMergePath] = useState<string | null>(null);
@@ -235,7 +256,11 @@ export function App() {
     }
   }
 
-  async function openPath(path?: string) {
+  async function openPath(path?: string, waitForRefresh = false) {
+    while (waitForRefresh && gate.current) {
+      pendingRefresh.current = false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     return perform('打开仓库', async () => {
       // Keep the operation lock while the native dialog restores window focus.
       const selectedPath = path ?? await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
@@ -532,7 +557,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (showHosting) return;
+      if (showHosting || showClone || showRemotes || showManager || transfer || hunks || showAmend || showInteractive || fileHistory) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
@@ -554,7 +579,7 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, review]);
+  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, transfer, hunks, showAmend, showInteractive, fileHistory, review]);
 
   function changeView(next: View) {
     setView(next);
@@ -624,6 +649,20 @@ export function App() {
           </span>
         )}
         <div class="header-actions">
+          <ActionMenu label="仓库工具" text="仓库" disabled={!root || !!busy}>
+            <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
+            <button onClick={() => setShowManager(true)}>分支、标签与 Stash</button>
+            <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
+            <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
+          </ActionMenu>
+          <ToolButton
+            icon="general/add"
+            label="克隆仓库"
+            disabled={!!busy}
+            onClick={() => setShowClone(true)}
+          >
+            <span>克隆</span>
+          </ToolButton>
           <ToolButton icon="vcs/update" label="签出标签或提交 SHA" disabled={!root || !!busy} onClick={() => setRevisionInput('')} />
           <ToolButton icon="toolwindows/vcs" label="操作恢复与 Reflog" disabled={!root || !!busy} onClick={() => setShowRecovery(true)}><span>Reflog</span></ToolButton>
           <ToolButton
@@ -637,10 +676,10 @@ export function App() {
           {(['fetch', 'pull', 'push'] as const).map((action) => (
             <ToolButton
               icon={action === 'fetch' ? 'vcs/fetch' : action === 'pull' ? 'vcs/update' : 'vcs/push'}
-              label={action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull · 仅快进拉取' : 'Push'}
+              label={action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull · 仅快进或 Rebase' : 'Push'}
               disabled={!root || !!busy}
               key={action}
-              onClick={() => void mutate('remote_action', { action }, action)}
+              onClick={() => setTransfer(action)}
             >
               <span>{action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull' : 'Push'}</span>
             </ToolButton>
@@ -685,7 +724,7 @@ export function App() {
             localRoot={root}
             onClose={() => setShowHosting(false)}
             onOpen={async (path) => {
-              if (await openPath(path)) setShowHosting(false);
+              if (await openPath(path, true)) setShowHosting(false);
             }}
           />
         </Suspense>
@@ -696,6 +735,7 @@ export function App() {
             <h1>IdeaGitTool</h1>
           </div>
           <p>Git 工作区</p>
+          <button disabled={!!busy} onClick={() => setShowClone(true)}>克隆远程仓库</button>
           <button class="primary" disabled={!!busy} onClick={() => void chooseRepository()}>
             <Icon name="general/open" />
             打开 Git 仓库
@@ -764,7 +804,7 @@ export function App() {
                   }}
                   onCheckout={(value) => void previewNavigation(value)}
                   onCreate={() => setDialog({ kind: 'branch', value: '' })}
-                  onFetch={() => void mutate('remote_action', { action: 'fetch' }, 'Fetch')}
+                  onFetch={() => setTransfer('fetch')}
                   onStash={() => setDialog({ kind: 'stash', value: 'Work in progress' })}
                   onApplyStash={(hash) => void mutate('apply_stash', { hash }, '应用 Stash')}
                   onOpen={(path) => void openPath(path)}
@@ -995,6 +1035,7 @@ export function App() {
                         }}
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
+                        onHunks={(change, area) => setHunks({ path: change.path, area })}
                         busy={!!busy}
                       />
                     </details>
@@ -1020,6 +1061,7 @@ export function App() {
                         onSelect={(change) => showLocalDiff(change, 'staged')}
                         onStage={(changes, unstage) => void stageChanges(changes, unstage)}
                         onDiscard={(changes, mode) => void previewDiscard(changes.map(change => change.path), mode)}
+                        onHunks={(change, area) => setHunks({ path: change.path, area })}
                         unstage
                         busy={!!busy}
                       />
@@ -1027,6 +1069,7 @@ export function App() {
                   </div>
                   <div class="commit-panel">
                     <label for="commit-message">提交说明</label>
+                    <button disabled={!!busy || !status.repository.head || !['none', 'rebase'].includes(status.repository.operation)} onClick={() => setShowAmend(true)}>Amend 最近提交…</button>
                     <textarea
                       id="commit-message"
                       placeholder="提交说明"
@@ -1080,6 +1123,14 @@ export function App() {
         </button>
         <span>0.4.0</span>
       </footer>
+      {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
+      {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
+      {showManager && root && <RepositoryManager key={root} root={root} onClose={() => setShowManager(false)} onChanged={() => refresh(root, true)} />}
+      {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
+      {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
+      {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
+      {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
+      {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={() => refresh(root, true)} />}
 
       {mergePath !== null && (
         <Suspense fallback={<div class="merge-manager empty">正在加载合并编辑器…</div>}>

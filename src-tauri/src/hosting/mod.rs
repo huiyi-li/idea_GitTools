@@ -5,6 +5,7 @@ pub mod commands;
 mod models;
 pub mod oauth;
 pub mod read;
+pub(crate) mod review_actions;
 
 use accounts::{AccountStore, NativeCredentials};
 use api::{client, Api};

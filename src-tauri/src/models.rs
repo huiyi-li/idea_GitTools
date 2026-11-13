@@ -56,7 +56,7 @@ pub struct LogQuery {
     pub branch: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Commit {
     pub hash: String,

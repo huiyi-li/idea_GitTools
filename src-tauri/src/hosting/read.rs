@@ -64,6 +64,7 @@ enum Kind {
     Commits,
     Checks,
     FileDiff,
+    Threads,
 }
 
 #[derive(Deserialize)]
@@ -81,6 +82,8 @@ pub struct ReadRequest {
     #[serde(default)]
     filter: String,
     request: Option<RemoteFileRequest>,
+    #[serde(default)]
+    cursor: String,
 }
 
 fn value<T: Serialize>(result: Result<T, String>) -> Result<Value, String> {
@@ -103,8 +106,12 @@ pub async fn hosting_read(
             page,
             filter,
             request,
+            cursor,
         } = request;
         match kind {
+            Kind::Threads => value(
+                commands::hosting_threads(account_id, repository, number, cursor, state).await,
+            ),
             Kind::Accounts => value(commands::hosting_accounts(state).await),
             Kind::Repositories => {
                 value(commands::hosting_repositories(account_id, page, state).await)

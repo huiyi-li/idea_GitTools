@@ -11,7 +11,8 @@
     "desktop": "tauri dev",
     "package": "tauri build",
     "postpackage": "node scripts/collect-release.mjs",
-    "test": "npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:native",
+    "test:native": "node scripts/test-native.mjs",
     "test:merge": "node scripts/test-merge.mjs"
   },
   "dependencies": {

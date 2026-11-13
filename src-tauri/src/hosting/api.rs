@@ -346,7 +346,12 @@ impl Api {
         })
     }
 
-    fn review_url(&self, path: &str, number: u64, suffix: &[&str]) -> Result<Url, String> {
+    pub(super) fn review_url(
+        &self,
+        path: &str,
+        number: u64,
+        suffix: &[&str],
+    ) -> Result<Url, String> {
         if number == 0 {
             return Err("请求编号无效".into());
         }

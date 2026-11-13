@@ -1186,3 +1186,28 @@ input[type='checkbox'] {
     display: none;
   }
 }
+.transport-form { display: grid; gap: 12px; }
+.transport-form label, .transport-auth label { display: grid; gap: 6px; }
+.transport-log { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--bg-editor); }
+.transport-auth { padding: 12px; border: 1px solid var(--border); }
+.hunk-list { max-height: 55vh; overflow: auto; }
+.hunk-item { border: 1px solid var(--border); margin: 10px 0; padding: 8px; }
+.hunk-item pre { overflow: auto; margin: 0; white-space: pre; }
+.blame-table { border-collapse: collapse; width: 100%; }
+.blame-table td { padding: 2px 8px; vertical-align: top; white-space: nowrap; }
+.blame-table pre { margin: 0; }
+.modal.transport-dialog, .modal.workflow-dialog {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.modal.transport-dialog { width: 620px; }
+.modal.workflow-dialog { width: min(920px, calc(100vw - 48px)); }
+.transport-dialog .modal-actions, .workflow-dialog .modal-actions { flex-wrap: wrap; }
+.workflow-dialog .modal-actions select { width: auto; }
+.transport-dialog label:has(> input[type="checkbox"]), .workflow-dialog label:has(> input[type="checkbox"]) {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.transport-dialog input[type="checkbox"], .workflow-dialog input[type="checkbox"] { width: auto; }
+.transport-form select { color: var(--fg); background: var(--bg-input); border: 1px solid var(--border-control); border-radius: 4px; padding: 5px 8px; }

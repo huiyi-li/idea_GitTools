@@ -195,8 +195,10 @@ function backend(options: { empty?: boolean; failCreate?: boolean; delayedRepos?
         return { ...review, title: args.request.title };
       case 'hosting_repository':
         return repository;
-      case 'hosting_clone':
-        return 'C:/fixture/repo';
+      case 'hosting_start_clone':
+        return 'clone-job';
+      case 'transport_progress':
+        return { id: 'clone-job', state: 'done', directory: 'C:/fixture/repo', lines: [], error: '', prompt: null };
       case 'hosting_open_url':
         return null;
       default:
@@ -531,7 +533,7 @@ test('clone dialog forwards SSH aliases and associates the completed local repos
       .querySelector('[role="dialog"] form')!
       .dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
     await waitFor(() => root.textContent?.includes('本地 · C:/fixture/repo'));
-    const request = calls.find((call) => call.command === 'hosting_clone')!.args.request;
+    const request = calls.find((call) => call.command === 'hosting_start_clone')!.args.request;
     assert.equal(request.sshAlias, 'github_ming');
     assert.equal(request.protocol, 'ssh');
     assert.equal(request.parent, 'C:/fixture');

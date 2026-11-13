@@ -10,7 +10,13 @@ import { useMinimapPreference } from './ui/editor-preferences';
 import { codeMinimap, minimapRanges, type MinimapRange } from './ui/minimap';
 import { diffLineHighlights } from './ui/diff-highlights';
 
-export function DiffEditors({ data, labels }: { data: PreparedDiff; labels?: [string, string] }) {
+export function DiffEditors({ data, labels, onLineSelect }: {
+  data: PreparedDiff;
+  labels?: [string, string];
+  onLineSelect?: (line: number, side: 'LEFT' | 'RIGHT') => void;
+}) {
+  const selection = useRef(onLineSelect);
+  selection.current = onLineSelect;
   const left = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
   const [sync, setSync] = useState(true);
@@ -68,6 +74,11 @@ export function DiffEditors({ data, labels }: { data: PreparedDiff; labels?: [st
       extensions: [
         ...extensions,
         minimapRanges.init(() => ranges('before')),
+        EditorView.updateListener.of((update) => {
+          if (update.selectionSet) {
+            selection.current?.(update.state.doc.lineAt(update.state.selection.main.head).number, 'LEFT');
+          }
+        }),
       ],
     });
     const b = new EditorView({
@@ -76,6 +87,11 @@ export function DiffEditors({ data, labels }: { data: PreparedDiff; labels?: [st
       extensions: [
         ...extensions,
         minimapRanges.init(() => ranges('after')),
+        EditorView.updateListener.of((update) => {
+          if (update.selectionSet) {
+            selection.current?.(update.state.doc.lineAt(update.state.selection.main.head).number, 'RIGHT');
+          }
+        }),
       ],
     });
     views.current = [a, b];

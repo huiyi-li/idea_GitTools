@@ -501,6 +501,54 @@ async function openChanges() {
   await waitFor(() => root.querySelector('#commit-message'));
 }
 
+test('completed URL clone waits for an in-flight refresh and opens the new workspace', async () => {
+  const calls = fixture();
+  const backend = globalThis.testBackend;
+  const old = await backend('repository_status', { root: 'C:/fixture' });
+  const next = { ...old, repository: { ...old.repository, root: 'C:/cloned', name: 'cloned' } };
+  let hold = false;
+  let complete = false;
+  let release: (() => void) | undefined;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'start_clone') return 'clone';
+    if (command === 'transport_progress') return { id: 'clone', state: complete ? 'done' : 'running', directory: 'C:/cloned', lines: [], error: '', prompt: null };
+    if (command === 'repository_status' && args.root === 'C:/fixture' && hold) {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return old;
+    }
+    if ((command === 'open_repository' && args.path === 'C:/cloned') || (command === 'repository_status' && args.root === 'C:/cloned')) return next;
+    return backend(command, args);
+  };
+  try {
+    await waitFor(() => root.querySelector('.workspace-tabs'));
+    button('克隆仓库').click();
+    await waitFor(() => root.querySelector('[aria-label="仓库地址"]'));
+    for (const [label, value] of [['仓库地址', 'https://host/repo.git'], ['克隆父目录', 'C:/']]) {
+      const element = root.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+      element.value = value;
+      element.dispatchEvent(new window.Event('input', { bubbles: true }));
+    }
+    await waitFor(() => !button('开始克隆').disabled);
+    root.querySelector('[aria-label="克隆仓库"] form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(() => root.querySelector('[aria-label="Git 传输进度"]'));
+    hold = true;
+    window.dispatchEvent(new window.Event('focus'));
+    await waitFor(() => release);
+    complete = true;
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(root.querySelector('.repository-picker')?.textContent?.trim(), 'fixture');
+    hold = false;
+    release!();
+    await waitFor(() => root.querySelector('.repository-picker')?.textContent?.includes('cloned'));
+    await waitFor(() => !root.querySelector('[role="dialog"]'));
+    await waitFor(() => calls.some((call) => call.command === 'read_log' && call.args.root === 'C:/cloned'));
+  } finally {
+    hold = false;
+    release?.();
+    render(null, root);
+  }
+});
+
 test('staged and unstaged lists request distinct comparisons for the same file', async () => {
   const calls = fixture(false, { changes: [{ path: 'src/example.ts', oldPath: null, index: 'M', workTree: 'M', conflict: false }] });
   try {

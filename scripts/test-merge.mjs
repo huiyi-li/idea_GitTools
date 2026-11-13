@@ -17,12 +17,13 @@ try {
     'hosting-ui.test',
     'review-ui.test',
     'navigation-ui.test',
+    'transport-ui.test',
   ];
   await build({
     entryPoints: [
       ...tests.map(
         (name) =>
-          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test', 'hosting-ui.test', 'review-ui.test', 'navigation-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
+          `test/${name}.${['workspace-ui.test', 'diff-ui.test', 'minimap.test', 'hosting-ui.test', 'review-ui.test', 'navigation-ui.test', 'transport-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
       ),
       'test/analysis-worker.ts',
     ],

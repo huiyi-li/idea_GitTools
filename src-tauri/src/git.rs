@@ -8,9 +8,14 @@ use tokio::process::Command;
 
 mod content;
 pub(crate) mod discard;
+pub(crate) mod file_history;
 pub(crate) mod history;
+pub(crate) mod hunks;
+pub(crate) mod interactive;
+pub(crate) mod management;
 pub(crate) mod merge;
 pub(crate) mod navigation;
+pub(crate) mod remotes;
 pub(crate) mod review;
 
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;

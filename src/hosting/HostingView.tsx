@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { call, readSaved, save } from '../api';
 import { Icon, Modal, Split, ToolButton } from '../ui/controls';
 import { Accounts } from './Accounts';
+import { TransportProgress } from '../TransportDialog';
 import { ReviewList } from './Reviews';
 import { useRemote, useRemotePage } from './hooks';
 import { providerName, type Account, type HostedRepository } from './types';
@@ -332,7 +333,7 @@ function RepositoryWorkspace({
           <button onClick={() => setError('')}>关闭</button>
         </div>
       )}
-      <ReviewList account={account} repository={repository} />
+      <ReviewList account={account} repository={repository} localRoot={linked === localRoot ? localRoot : ''} onOpen={onOpen} />
       {cloning && (
         <CloneDialog
           account={account}
@@ -341,6 +342,7 @@ function RepositoryWorkspace({
           onCloned={(path) => {
             link(path);
             setCloning(false);
+            void onOpen(path);
           }}
         />
       )}
@@ -365,6 +367,7 @@ function CloneDialog({
   const [sshAlias, setSshAlias] = useState(() =>
     readSaved<string>(`hosting.ssh.${account.id}`, ''),
   );
+  const [jobId, setJobId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   return (
@@ -376,7 +379,7 @@ function CloneDialog({
           if (busy) return;
           setBusy(true);
           setError('');
-          void call<string>('hosting_clone', {
+          void call<string>('hosting_start_clone', {
             request: {
               accountId: account.id,
               repository: repository.path,
@@ -386,12 +389,11 @@ function CloneDialog({
               sshAlias,
             },
           })
-            .then((path) => {
+            .then((id) => {
               save(`hosting.ssh.${account.id}`, sshAlias);
-              onCloned(path);
+              setJobId(id);
             })
-            .catch((error) => setError(String(error)))
-            .finally(() => setBusy(false));
+            .catch((error) => { setError(String(error)); setBusy(false); });
         }}
       >
         <h2>克隆 {repository.path}</h2>
@@ -453,8 +455,7 @@ function CloneDialog({
           </label>
         )}
         <p class="muted">
-          SSH 使用已有密钥配置，HTTPS 使用系统 Git 凭据管理器。请先在 Git
-          中完成认证。目标目录须为新目录。
+          SSH 使用已有密钥配置，HTTPS 使用系统 Git 凭据管理器。需要时将在此窗口请求认证。
         </p>
         {error && (
           <p class="error-text" role="alert">
@@ -470,6 +471,7 @@ function CloneDialog({
           </button>
         </div>
       </form>
+      {jobId && <TransportProgress id={jobId} onIdle={(idle) => setBusy(!idle)} onDone={onCloned} />}
     </Modal>
   );
 }

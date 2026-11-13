@@ -6,6 +6,7 @@ import type { PreparedDiff } from '../merge/analysis';
 import { FileIcon, Modal, Split, ToolButton } from '../ui/controls';
 import { Pagination, RemoteMessage } from './HostingView';
 import { useRemote, useRemotePage } from './hooks';
+import { ReviewActions, ReviewThreads, InlineReview } from './ReviewActions';
 import {
   reviewName,
   stateLabel,
@@ -21,9 +22,13 @@ import {
 export function ReviewList({
   account,
   repository,
+  localRoot = '',
+  onOpen = async () => {},
 }: {
   account: Account;
   repository: HostedRepository;
+  localRoot?: string;
+  onOpen?: (path: string) => Promise<void>;
 }) {
   const [filter, setFilter] = useState('open');
   const [search, setSearch] = useState('');
@@ -104,6 +109,8 @@ export function ReviewList({
             repository={repository}
             number={number}
             onChanged={reviews.reload}
+            localRoot={localRoot}
+            onOpen={onOpen}
           />
         ) : (
           <div class="empty">选择请求查看详情</div>
@@ -130,11 +137,15 @@ function ReviewDetails({
   repository,
   number,
   onChanged,
+  localRoot,
+  onOpen,
 }: {
   account: Account;
   repository: HostedRepository;
   number: number;
   onChanged: () => void;
+  localRoot: string;
+  onOpen: (path: string) => Promise<void>;
 }) {
   const args = { accountId: account.id, repository: repository.path, number };
   const details = useRemote<ReviewRequest>('hosting_review', args);
@@ -183,6 +194,7 @@ function ReviewDetails({
                 #{number} · {review.author}
               </span>
               <span class="spacer" />
+              <ReviewActions args={args} review={review} provider={account.provider} localRoot={localRoot} onChanged={() => { details.reload(); onChanged(); }} onOpen={onOpen} />
               <ToolButton
                 icon="general/refresh"
                 label="刷新请求详情"
@@ -219,6 +231,7 @@ function ReviewDetails({
               ['commits', '提交'],
               ['files', '变更文件'],
               ['checks', 'CI 状态'],
+              ['threads', '审查讨论'],
             ].map(([id, label]) => (
               <button
                 key={id}
@@ -255,6 +268,7 @@ function ReviewDetails({
           {tab === 'commits' && <Commits args={args} />}
           {tab === 'files' && <Files args={args} review={review} />}
           {tab === 'checks' && <Checks args={args} />}
+          {tab === 'threads' && <ReviewThreads args={args} review={review} />}
         </>
       )}
     </section>
@@ -438,6 +452,7 @@ function RemoteDiff({
     },
   });
   const [prepared, setPrepared] = useState<PreparedDiff>();
+  const [line, setLine] = useState<{ line: number; side: 'LEFT' | 'RIGHT' } | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     setPrepared(undefined);
@@ -463,6 +478,7 @@ function RemoteDiff({
       <div class="panel-heading">
         <FileIcon path={file.path} />
         <span class="ellipsis">{file.path}</span>
+        <InlineReview args={args} review={review} path={file.path} oldPath={file.oldPath} selected={line} />
         <span class="muted">
           {file.additions != null ? `+${file.additions} −${file.deletions ?? 0}` : file.status}
         </span>
@@ -473,7 +489,7 @@ function RemoteDiff({
       ) : diff.value?.binary ? (
         <div class="empty">二进制文件</div>
       ) : prepared ? (
-        <DiffEditors data={prepared} labels={['合并基准', review.sourceBranch]} />
+        <DiffEditors data={prepared} labels={['合并基准', review.sourceBranch]} onLineSelect={(line, side) => setLine({ line, side })} />
       ) : (
         diff.value && !error && <div class="empty">正在计算差异…</div>
       )}
