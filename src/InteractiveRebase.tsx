@@ -40,14 +40,16 @@ export function autosquash(entries: Entry[], commits: Commit[]) {
 
 export function InteractiveRebase({
   root,
+  initialBase = '',
   onClose,
   onChanged,
 }: {
   root: string;
+  initialBase?: string;
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
-  const [base, setBase] = useState('');
+  const [base, setBase] = useState(initialBase);
   const [onto, setOnto] = useState('');
   const [preview, setPreview] = useState<Preview>();
   const [entries, setEntries] = useState<Entry[]>([]);

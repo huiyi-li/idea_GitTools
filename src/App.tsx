@@ -208,6 +208,7 @@ export function App() {
   const [hunks, setHunks] = useState<{ path: string; area: 'staged' | 'unstaged' } | null>(null);
   const [showAmend, setShowAmend] = useState(false);
   const [showInteractive, setShowInteractive] = useState(false);
+  const [interactiveBase, setInteractiveBase] = useState('');
   const [fileHistory, setFileHistory] = useState(false);
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [showMultiRepository, setShowMultiRepository] = useState(false);
@@ -830,7 +831,7 @@ export function App() {
             <button onClick={() => openManager('shelves')}>Shelf 管理</button>
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
-            <button onClick={() => setShowInteractive(true)}>交互式 Rebase</button>
+            <button onClick={() => { setInteractiveBase(''); setShowInteractive(true); }}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
             <button onClick={() => setLocalHistoryPath('')}>Local History</button>
             <button onClick={() => setShowMultiRepository(true)}>多仓库同步与提交图</button>
@@ -1412,7 +1413,7 @@ export function App() {
       {ignorePath !== null && root && <IgnoreDialog key={root} root={root} initialPath={ignorePath} onClose={() => setIgnorePath(null)} onChanged={() => refresh(root)} />}
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
-      {showInteractive && root && <InteractiveRebase key={root} root={root} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
+      {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}`} root={root} initialBase={interactiveBase} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
       {showMultiRepository && <MultiRepositoryDialog currentRoot={root} onClose={() => setShowMultiRepository(false)} />}
@@ -1498,6 +1499,18 @@ export function App() {
           }}
         >
           Revert…
+        </button>
+        <button
+          role="menuitem"
+          disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none' || !!status.changes.length}
+          onClick={() => {
+            const commit = commitContext.commit;
+            setCommitContext(null);
+            setInteractiveBase(commit.parents[0] ?? '');
+            setShowInteractive(true);
+          }}
+        >
+          从此提交开始交互式 Rebase…
         </button>
       </div>}
       {discard && <DiscardDialog preview={discard} busy={!!busy} error={discardError}
