@@ -3,24 +3,50 @@ use crate::git::tests::{fixture, run};
 use tempfile::TempDir;
 
 async fn conflict() -> (TempDir, Git) {
+    conflict_at("conflict.txt").await
+}
+
+async fn conflict_at(path: &str) -> (TempDir, Git) {
     let dir = fixture();
+    fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
     let git = Git::open(dir.path().to_str().unwrap(), None).await.unwrap();
-    fs::write(dir.path().join("conflict.txt"), "start\nbase\nend\n").unwrap();
-    git.stage(vec!["conflict.txt".into()], false).await.unwrap();
+    fs::write(dir.path().join(path), "start\nbase\nend\n").unwrap();
+    git.stage(vec![path.into()], false).await.unwrap();
     git.commit("initial").await.unwrap();
     git.create_branch("feature").await.unwrap();
-    fs::write(dir.path().join("conflict.txt"), "start\nfeature\nend\n").unwrap();
-    git.stage(vec!["conflict.txt".into()], false).await.unwrap();
+    fs::write(dir.path().join(path), "start\nfeature\nend\n").unwrap();
+    git.stage(vec![path.into()], false).await.unwrap();
     git.commit("feature edit").await.unwrap();
     git.checkout("refs/heads/main").await.unwrap();
-    fs::write(dir.path().join("conflict.txt"), "start\nmain\nend\n").unwrap();
-    git.stage(vec!["conflict.txt".into()], false).await.unwrap();
+    fs::write(dir.path().join(path), "start\nmain\nend\n").unwrap();
+    git.stage(vec![path.into()], false).await.unwrap();
     git.commit("main edit").await.unwrap();
     assert_ne!(
         git.execute(&["merge", "feature"], None).await.unwrap().code,
         0
     );
     (dir, git)
+}
+
+#[tokio::test]
+async fn whole_side_resolution_can_restore_a_removed_parent_directory() {
+    let (dir, mut git) = conflict_at("nested/conflict.txt").await;
+    fs::remove_file(dir.path().join("nested/conflict.txt")).unwrap();
+    fs::remove_dir(dir.path().join("nested")).unwrap();
+    let document = git.open_merge("nested/conflict.txt".into()).await.unwrap();
+    git.save_merge(SaveMerge {
+        id: document.id,
+        choice: "right".into(),
+        finish: true,
+        progress: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.path().join("nested/conflict.txt")).unwrap(),
+        "start\nfeature\nend\n"
+    );
+    assert!(git.merge_overview().await.unwrap().files.is_empty());
 }
 
 fn result(id: &str, text: &str, finish: bool) -> SaveMerge {

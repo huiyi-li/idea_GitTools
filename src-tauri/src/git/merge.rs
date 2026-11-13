@@ -472,6 +472,9 @@ impl Git {
                 if content.len() > limit {
                     return Err("合并结果超过文件大小限制".into());
                 }
+                fs::create_dir_all(path.parent().ok_or("文件路径错误")?)
+                    .map_err(|e| e.to_string())?;
+                checked_path(&self.root, &session.path)?;
                 atomic_write(&path, content.as_bytes(), Some(&session.worktree))?;
             }
             "left" | "right" if request.finish => {
@@ -482,6 +485,9 @@ impl Git {
                 };
                 if let Some(entry) = session.entries.iter().find(|entry| entry.stage == stage) {
                     selected_mode = Some(entry.mode.clone());
+                    fs::create_dir_all(path.parent().ok_or("文件路径错误")?)
+                        .map_err(|e| e.to_string())?;
+                    checked_path(&self.root, &session.path)?;
                     // checkout-index applies Git's worktree filters, encoding and file mode.
                     let directory = tempfile::tempdir_in(path.parent().ok_or("文件路径错误")?)
                         .map_err(|e| e.to_string())?;
@@ -613,17 +619,7 @@ impl Git {
 }
 
 fn checked_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    validate_path(relative)?;
-    let path = root.join(relative);
-    let parent = path
-        .parent()
-        .ok_or("文件路径错误")?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !parent.starts_with(root) {
-        return Err("文件目录位于仓库之外".into());
-    }
-    Ok(path)
+    super::discard::checked_path(root, relative)
 }
 
 pub(super) fn stamp(path: &Path) -> Result<String, String> {
