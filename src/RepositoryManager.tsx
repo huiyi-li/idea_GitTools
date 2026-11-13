@@ -27,6 +27,7 @@ export function RepositoryManager({
   onChanged,
   initialTab = 'branches',
   initialStash,
+  initialRevision,
   version = 0,
 }: {
   root: string;
@@ -34,6 +35,7 @@ export function RepositoryManager({
   onChanged: (openConflicts?: boolean) => Promise<void>;
   initialTab?: 'branches' | 'tags' | 'stashes' | 'shelves';
   initialStash?: { reference: string; hash: string };
+  initialRevision?: string;
   version?: number;
 }) {
   const [data, setData] = useState<Management>();
@@ -66,7 +68,7 @@ export function RepositoryManager({
   async function load() {
     const next = await call<Management>('repository_management', { root });
     setData(next);
-    setRevision(next.status.repository.head ?? '');
+    setRevision(previous => previous || initialRevision || next.status.repository.head || '');
     setRemote((previous) => previous || next.remotes[0]?.name || '');
     setClearConfirm(false);
     if (stashTab && selected && (JSON.stringify(next.status.stashes) !== JSON.stringify(data?.status.stashes)

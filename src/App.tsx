@@ -202,6 +202,7 @@ export function App() {
   const [showManager, setShowManager] = useState(false);
   const [managerTab, setManagerTab] = useState<'branches' | 'tags' | 'stashes' | 'shelves'>('branches');
   const [managerStash, setManagerStash] = useState<Status['stashes'][number]>();
+  const [managerRevision, setManagerRevision] = useState('');
   const [branchDialog, setBranchDialog] = useState<{ branch: Branch; action: 'rename' | 'delete' } | null>(null);
   const [showWorktrees, setShowWorktrees] = useState(false);
   const [ignorePath, setIgnorePath] = useState<string | null>(null);
@@ -579,9 +580,10 @@ export function App() {
     }
   }
 
-  function openManager(tab: 'branches' | 'tags' | 'stashes' | 'shelves', stash?: Status['stashes'][number]) {
+  function openManager(tab: 'branches' | 'tags' | 'stashes' | 'shelves', stash?: Status['stashes'][number], revision = '') {
     setManagerTab(tab);
     setManagerStash(stash);
+    setManagerRevision(revision);
     setShowManager(true);
   }
 
@@ -1402,8 +1404,8 @@ export function App() {
       {showDiagnostics && root && <DiagnosticsDialog key={root} root={root} onClose={() => setShowDiagnostics(false)} />}
       {showBisect && root && <BisectDialog key={root} root={root} onClose={() => setShowBisect(false)} onChanged={() => refresh(root, true)} />}
       {showSubmodules && root && <SubmoduleDialog key={root} root={root} onClose={() => setShowSubmodules(false)} onChanged={() => refresh(root, true)} />}
-      {showManager && root && <RepositoryManager key={`${root}-${managerTab}-${managerStash?.reference ?? ''}-${managerStash?.hash ?? ''}`} root={root}
-        initialTab={managerTab} initialStash={managerStash} version={version} onClose={() => setShowManager(false)} onChanged={openConflicts => refresh(root, openConflicts)} />}
+      {showManager && root && <RepositoryManager key={`${root}-${managerTab}-${managerStash?.reference ?? ''}-${managerStash?.hash ?? ''}-${managerRevision}`} root={root}
+        initialTab={managerTab} initialStash={managerStash} initialRevision={managerRevision} version={version} onClose={() => setShowManager(false)} onChanged={openConflicts => refresh(root, openConflicts)} />}
       {branchDialog && root && <BranchDialog key={`${root}-${branchDialog.branch.full}-${branchDialog.action}`} root={root} initialBranch={branchDialog.branch} action={branchDialog.action}
         onClose={() => setBranchDialog(null)} onOpen={path => openPath(path, true)} onChanged={async renamed => {
           if (branch === branchDialog.branch.full) { setBranch(renamed ?? ''); setOffset(0); }
@@ -1511,6 +1513,17 @@ export function App() {
           }}
         >
           从此提交开始交互式 Rebase…
+        </button>
+        <button
+          role="menuitem"
+          disabled={!!busy || status?.repository.operation !== 'none'}
+          onClick={() => {
+            const commit = commitContext.commit;
+            setCommitContext(null);
+            openManager('tags', undefined, commit.hash);
+          }}
+        >
+          从此提交创建标签…
         </button>
       </div>}
       {discard && <DiscardDialog preview={discard} busy={!!busy} error={discardError}
