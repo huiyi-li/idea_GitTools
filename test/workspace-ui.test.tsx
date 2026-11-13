@@ -138,6 +138,7 @@ function fixture(
   if (options.clean) status.changes = [];
   if (options.changes) status.changes = structuredClone(options.changes);
   let resolved = false;
+  let savedMerge: any = null;
   globalThis.testBackend = async (command: string, args: any) => {
     calls.push({ command, args: structuredClone(args) });
     switch (command) {
@@ -243,7 +244,7 @@ function fixture(
           base: 'start\nbase\nend\n',
           left: 'start\nlocal\nend\n',
           right: 'start\nincoming\nend\n',
-          working: 'start\n<<<<<<< HEAD\nlocal\n=======\nincoming\n>>>>>>> feature\nend\n',
+          working: savedMerge ? savedMerge.lines.join('\n') : 'start\n<<<<<<< HEAD\nlocal\n=======\nincoming\n>>>>>>> feature\nend\n',
           leftTitle: '本地版本 · main',
           rightTitle: '合入版本 · feature',
           leftStage: 2,
@@ -254,10 +255,11 @@ function fixture(
           large: !!options.largeMerge,
           reason: options.largeMerge ? '大文件可按需加载' : '',
           markerSize: 7,
-          progress: null,
+          progress: savedMerge ? structuredClone(savedMerge) : null,
         };
       case 'save_merge':
         resolved = args.request.finish;
+        if (args.request.progress) savedMerge = structuredClone(args.request.progress);
         return '';
       case 'merge_operation':
         resolved = true;
@@ -719,6 +721,51 @@ test('merge manager opens from the workspace, applies an arrow and stages the re
   } finally {
     render(null, root);
   }
+});
+
+test('saved merge results retain their resolved states after reopening and support side preview undo', async () => {
+  const calls = fixture(true);
+  try {
+    await waitFor(() => root.querySelector('.workspace-tabs .operation'));
+    (root.querySelector('.workspace-tabs .operation') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('.mg-op'));
+    button('全部采用传入版本').click();
+    await waitFor(() => !button('完成并暂存').disabled);
+    assert.ok(root.querySelector('.mg-result .cm-content')?.textContent?.includes('incoming'));
+    button('撤销').click();
+    await waitFor(() => button('完成并暂存').disabled);
+    button('全部采用传入版本').click();
+    await waitFor(() => !button('完成并暂存').disabled);
+    button('保存进度').click();
+    await waitFor(() => root.querySelector('.merge-content > .panel-heading .muted')?.textContent === '进度已保存');
+    await waitFor(() => !button('完成并暂存').disabled);
+    button('关闭合并管理器').click();
+    await waitFor(() => !root.querySelector('.merge-manager'));
+    (root.querySelector('.workspace-tabs .operation') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('.mg-result .cm-content')?.textContent?.includes('incoming'));
+    await waitFor(() => !button('完成并暂存').disabled);
+    assert.ok(calls.filter(call => call.command === 'open_merge').length >= 2);
+  } finally { render(null, root); }
+});
+
+test('whole-side resolution explicitly confirms overwriting an edited merge without saving it first', async () => {
+  const calls = fixture(true);
+  try {
+    await waitFor(() => root.querySelector('.workspace-tabs .operation'));
+    (root.querySelector('.workspace-tabs .operation') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('.mg-op'));
+    button('全部采用本地版本').click();
+    button('以传入版本覆盖并暂存…').click();
+    await waitFor(() => root.querySelector('[role="alertdialog"]'));
+    assert.equal(calls.some(call => call.command === 'save_merge'), false);
+    button('确认覆盖并暂存').click();
+    await waitFor(() => calls.some(call => call.command === 'save_merge'));
+    const writes = calls.filter(call => call.command === 'save_merge');
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].args.request.choice, 'right');
+    assert.equal(writes[0].args.request.finish, true);
+    await waitFor(() => !root.querySelector('.merge-editor'));
+  } finally { render(null, root); }
 });
 
 test('large conflicts opt in through the main merge manager and save through the existing workflow', async () => {

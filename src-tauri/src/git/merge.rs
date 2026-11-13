@@ -93,6 +93,7 @@ pub(crate) struct MergeDocument {
     reason: String,
     marker_size: usize,
     progress: Option<Progress>,
+    progress_notice: String,
 }
 
 #[derive(Deserialize)]
@@ -298,20 +299,29 @@ impl Git {
         )
         .join("ideagittool-merge-drafts");
         let draft_path = directory.join(format!("{:x}.json", Sha256::digest(path.as_bytes())));
+        let mut progress_notice = String::new();
         let progress = if let Ok(file) = File::open(&draft_path) {
             let mut bytes = Vec::new();
             file.take((MAX_LARGE_FILE * 8 + 1) as u64)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            serde_json::from_slice::<Draft>(&bytes)
+            let progress = serde_json::from_slice::<Draft>(&bytes)
                 .ok()
                 .filter(|draft| {
                     draft.entries == entries
                         && draft.operation_id == operation_id
-                        && draft.worktree == worktree
                         && validate_progress(&draft.progress, allow_large).is_ok()
+                        && (draft.worktree == worktree
+                            || working.as_ref().is_some_and(|text| {
+                                text.replace("\r\n", "\n") == draft.progress.lines.join("\n")
+                            }))
                 })
-                .map(|draft| draft.progress)
+                .map(|draft| draft.progress);
+            if progress.is_none() {
+                progress_notice =
+                    "当前文件内容或冲突来源已变化，已保留磁盘内容，请重新确认处理状态".into();
+            }
+            progress
         } else {
             None
         };
@@ -383,6 +393,7 @@ impl Git {
             reason,
             marker_size,
             progress,
+            progress_notice,
         })
     }
 

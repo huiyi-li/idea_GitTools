@@ -78,6 +78,9 @@ export const MergeEditor = forwardRef<
         analysis = new MergeAnalysis();
         const prepared = await analysis.prepare(data);
         if (!current) return;
+        if (data.progress && data.progress.states.length !== prepared.changes.length) {
+          setError('已保留保存的文本，变化块结构已更新，请核对未确认的处理状态');
+        }
         if (data.large) analysis.close();
         value = new MergeController(
           {
@@ -213,6 +216,13 @@ export const MergeEditor = forwardRef<
           disabled={unavailable || !controller.current?.hasResolvable()}
           onClick={() => action((c) => c.resolveSimpleConflicts())}
         />
+        <span class="toolbar-separator" />
+        <button disabled={unavailable} title={`将完整左侧版本放入结果栏 · ${data.leftTitle}`} onClick={() => action(c => c.acceptSide('left'))}>
+          {data.leftStage === 3 ? '全部采用正在重放版本' : '全部采用本地版本'}
+        </button>
+        <button disabled={unavailable} title={`将完整右侧版本放入结果栏 · ${data.rightTitle}`} onClick={() => action(c => c.acceptSide('right'))}>
+          {data.leftStage === 3 ? '全部采用目标分支版本' : '全部采用传入版本'}
+        </button>
         <span class="toolbar-separator" />
         <ActionMenu icon="vcs/merge" label="处理选中块" text="选中块" disabled={unavailable}>
           <div class="menu-caption">对结果栏中选中的块执行</div>

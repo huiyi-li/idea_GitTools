@@ -6,7 +6,7 @@ import type { MergeDocument, MergeOverview } from './protocol';
 import './manager.css';
 import { FileIcon, Icon, Split, ToolButton } from '../ui/controls';
 
-type Confirmation = { kind: 'leave'; action: () => void } | { kind: 'abort' | 'skip' } | null;
+type Confirmation = { kind: 'leave'; action: () => void } | { kind: 'abort' | 'skip' } | { kind: 'side'; side: 'left' | 'right'; id: string } | null;
 
 export default function MergeManager({
   root,
@@ -87,12 +87,15 @@ export default function MergeManager({
       await call('save_merge', { root, request: { id: document.id, finish, choice, progress } });
       markDirty(false);
       if (finish) {
+        setDocument(null);
         setCompleted((paths) => [...paths.filter((path) => path !== document.path), document.path]);
         const next = await refreshOverview();
-        setDocument(null);
         if (next.files[0]) await load(next.files[0].path);
         else setNotice('所有冲突文件已暂存，可以继续 Git 操作或返回工作区检查。');
-      } else setNotice('进度已写入工作区，冲突仍保留在 Git 暂存区。再次打开文件可恢复进度。');
+      } else {
+        setDocument(previous => previous?.id === document.id ? { ...previous, progress, working: progress!.lines.join('\n') } : previous);
+        setNotice('进度已写入工作区，冲突仍保留在 Git 暂存区。再次打开文件可恢复进度。');
+      }
     });
   }
   saveCurrent.current = save;
@@ -297,9 +300,10 @@ export default function MergeManager({
                     {document.path}
                   </span>
                   <span class="muted">
-                    {dirty ? '有未保存编辑' : document.progress ? '已恢复保存的进度' : '逐块处理后完成并暂存'}
+                    {dirty ? '有未保存编辑' : document.progress ? '进度已保存' : '逐块处理后完成并暂存'}
                   </span>
                 </div>
+                {document.progressNotice && <p class="merge-progress-notice" role="status">{document.progressNotice}</p>}
                 {document.editable ? (
                   <MergeEditor
                     key={document.id}
@@ -328,16 +332,16 @@ export default function MergeManager({
                   <button
                     disabled={!!busy}
                     title="使用整个左侧版本并暂存文件"
-                    onClick={() => askLeave(() => void save(true, 'left'))}
+                    onClick={() => setConfirmation({ kind: 'side', side: 'left', id: document.id })}
                   >
-                    {document.leftPresent ? '接受左侧' : '按左侧删除'}
+                    {document.leftPresent ? (document.leftStage === 3 ? '以正在重放版本覆盖并暂存…' : '以本地版本覆盖并暂存…') : '按左侧删除…'}
                   </button>
                   <button
                     disabled={!!busy}
                     title="使用整个右侧版本并暂存文件"
-                    onClick={() => askLeave(() => void save(true, 'right'))}
+                    onClick={() => setConfirmation({ kind: 'side', side: 'right', id: document.id })}
                   >
-                    {document.rightPresent ? '接受右侧' : '按右侧删除'}
+                    {document.rightPresent ? (document.leftStage === 3 ? '以目标分支版本覆盖并暂存…' : '以传入版本覆盖并暂存…') : '按右侧删除…'}
                   </button>
                   <span class="spacer" />
                   <button
@@ -374,14 +378,14 @@ export default function MergeManager({
         <div class="modal-backdrop">
           <div class="modal" role="alertdialog" aria-modal="true">
             <h2>
-              {confirmation.kind === 'abort'
+              {confirmation.kind === 'side' ? '使用完整版本并标记已解决？' : confirmation.kind === 'abort'
                 ? '中止当前 Git 操作？'
                 : confirmation.kind === 'skip'
                   ? '跳过当前提交？'
                   : '保存当前文件的编辑？'}
             </h2>
             <p>
-              {confirmation.kind === 'abort'
+              {confirmation.kind === 'side' ? `${document?.path}\n${confirmation.side === 'left' ? document?.leftTitle : document?.rightTitle}\n将用此侧完整版本覆盖当前结果并暂存。该侧不存在文件时将删除文件。` : confirmation.kind === 'abort'
                 ? 'Git 将回退本次操作，已写入的合并结果可能被还原。'
                 : confirmation.kind === 'skip'
                   ? 'Git 将放弃当前提交的应用结果，并继续处理后续提交。'
@@ -391,7 +395,11 @@ export default function MergeManager({
               <button disabled={!!busy} onClick={() => setConfirmation(null)}>
                 取消
               </button>
-              {confirmation.kind !== 'leave' ? (
+              {confirmation.kind === 'side' ? <button disabled={!!busy || confirmation.id !== document?.id} onClick={() => {
+                const side = confirmation.side;
+                setConfirmation(null);
+                void save(true, side);
+              }}>确认覆盖并暂存</button> : confirmation.kind !== 'leave' ? (
                 <button
                   disabled={!!busy}
                   onClick={() => {

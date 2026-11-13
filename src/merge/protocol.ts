@@ -24,4 +24,5 @@ export interface MergeDocument {
   reason: string;
   markerSize: number;
   progress: MergeProgress | null;
+  progressNotice?: string;
 }

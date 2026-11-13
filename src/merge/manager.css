@@ -77,6 +77,8 @@
   min-width: 0;
   min-height: 0;
 }
+.merge-progress-notice { margin: 6px 12px; font-size: 12px; color: var(--fg-info); }
+.merge-editor .merge-tools { flex-wrap: wrap; height: auto; min-height: 32px; }
 .merge-content > .panel-heading > .mono {
   flex: 1;
 }

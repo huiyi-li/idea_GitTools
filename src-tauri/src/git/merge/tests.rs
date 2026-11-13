@@ -163,6 +163,39 @@ async fn draft_survives_restart_and_finish_preserves_other_staged_files() {
 }
 
 #[tokio::test]
+async fn saved_resolution_survives_external_line_ending_normalization() {
+    let (dir, mut git) = conflict().await;
+    let document = git.open_merge("conflict.txt".into()).await.unwrap();
+    let mut request = result(&document.id, "start\nresolved\nend\n", false);
+    request.progress.as_mut().unwrap().states.push(ChangeState {
+        start: 1,
+        end: 2,
+        resolved_left: true,
+        resolved_right: true,
+        oneside: false,
+    });
+    git.save_merge(request).await.unwrap();
+    fs::write(
+        dir.path().join("conflict.txt"),
+        "start\r\nresolved\r\nend\r\n",
+    )
+    .unwrap();
+    let reopened = git.open_merge("conflict.txt".into()).await.unwrap();
+    let progress = reopened
+        .progress
+        .expect("text-equivalent saved progress must survive");
+    assert!(progress.states[0].resolved_left && progress.states[0].resolved_right);
+    fs::write(dir.path().join("conflict.txt"), "different external work\n").unwrap();
+    let changed = git.open_merge("conflict.txt".into()).await.unwrap();
+    assert!(changed.progress.is_none());
+    assert!(!changed.progress_notice.is_empty());
+    assert_eq!(
+        changed.working.as_deref(),
+        Some("different external work\n")
+    );
+}
+
+#[tokio::test]
 async fn refuses_stale_worktree_and_index_and_existing_lock() {
     let (dir, mut git) = conflict().await;
     let document = git.open_merge("conflict.txt".into()).await.unwrap();

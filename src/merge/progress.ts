@@ -6,13 +6,13 @@ import type { MergeDocument } from './protocol';
 /** Preserve existing edits around Git markers, while restoring recognized
  * conflict blocks to their base so that the block operations can resolve them. */
 export function initialProgress(document: MergeDocument, prepared?: MergeModel): MergeProgress | undefined {
-  if (document.progress) return document.progress;
-  if (document.working === null) return undefined;
+  if (document.working === null && !document.progress) return undefined;
   const base = splitText(document.base).lines;
   const left = splitText(document.left).lines;
   const right = splitText(document.right).lines;
   const model = prepared ?? MergeModel.create(base, left, right);
-  const result = splitText(document.working).lines;
+  if (document.progress?.states.length === model.changes.length) return document.progress;
+  const result = splitText(document.progress?.lines.join('\n') ?? document.working!).lines;
   const marker = (symbol: string) => symbol.repeat(document.markerSize);
   const replacements: { start: number; end: number; lines: string[] }[] = [];
   const used = new Set<number>();
@@ -53,12 +53,12 @@ export function initialProgress(document: MergeDocument, prepared?: MergeModel):
     const state = model.states[change.index];
     const content = linesContent(result, [state.start, state.end]);
     if (
-      change.kind !== 'conflict' &&
+      !used.has(change.index) &&
       ((change.leftChange && content === linesContent(left, change.left)) ||
         (change.rightChange && content === linesContent(right, change.right)))
     ) {
       model.markResolved(change.index);
     }
   }
-  return { lines: result, states: model.states, contentModified: false };
+  return { lines: result, states: model.states, contentModified: document.progress?.contentModified ?? false };
 }

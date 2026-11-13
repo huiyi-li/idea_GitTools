@@ -89,6 +89,14 @@ test('preserves externally edited content that has no marker blocks', () => {
   assert.equal(initialProgress(value)!.lines.join('\n'), value.working);
 });
 
+test('a marker-free side result recovers resolved flags when saved block metadata is missing', () => {
+  const value = document({ working: 'start\nincoming\nend\n', progress: { lines: ['start', 'incoming', 'end', ''], states: [], contentModified: true } });
+  const restored = initialProgress(value)!;
+  assert.equal(restored.lines.join('\n'), value.working);
+  assert.equal(restored.states.length, 1);
+  assert.ok(restored.states[0].resolvedLeft && restored.states[0].resolvedRight);
+});
+
 test('keeps unrelated marker-like content that does not match the index versions', () => {
   const value = document({
     working: 'start\n<<<<<<< unrelated\ndifferent\n=======\nother\n>>>>>>> example\nend\n',
