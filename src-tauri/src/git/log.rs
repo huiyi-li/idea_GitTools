@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "log_content_tests.rs"]
+mod content_tests;
+
 fn valid_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
@@ -37,9 +41,15 @@ fn valid_date(value: &str) -> bool {
 impl Git {
     pub async fn log(&self, query: LogQuery) -> Result<LogPage, String> {
         if query.offset > 10_000_000
-            || [&query.search, &query.author, &query.path, &query.branch]
-                .iter()
-                .any(|s| s.len() > 4096 || s.contains('\0'))
+            || [
+                &query.search,
+                &query.author,
+                &query.path,
+                &query.branch,
+                &query.content,
+            ]
+            .iter()
+            .any(|s| s.len() > 4096 || s.contains('\0'))
         {
             return Err("提交筛选条件过长或包含无效字符".into());
         }
@@ -88,6 +98,10 @@ impl Git {
             }
             result.checked()?;
         }
+        // Git applies --skip before pickaxe. Page the matching commits instead.
+        let content_search = !query.content.is_empty();
+        let git_skip = if content_search { 0 } else { query.offset };
+        let limit = PAGE_SIZE + 1 + if content_search { query.offset } else { 0 };
         let mut args = vec![
             "--literal-pathspecs".into(),
             "log".into(),
@@ -96,8 +110,8 @@ impl Git {
             "--decorate-refs-exclude=refs/stash".into(),
             "-z".into(),
             format!("--format={LOG_FORMAT}"),
-            format!("--skip={}", query.offset),
-            format!("--max-count={}", PAGE_SIZE + 1),
+            format!("--skip={git_skip}"),
+            format!("--max-count={limit}"),
             "--fixed-strings".into(),
             "--regexp-ignore-case".into(),
         ];
@@ -108,6 +122,19 @@ impl Git {
         }
         if query.first_parent {
             args.push("--first-parent".into());
+        }
+        if !query.content.is_empty() {
+            args.extend(
+                [
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--diff-merges=first-parent",
+                    "--no-patch",
+                ]
+                .map(String::from),
+            );
+            let option = if query.content_regex { "-G" } else { "-S" };
+            args.push(format!("{option}{}", query.content));
         }
         for (option, value) in [("--grep", &query.search), ("--author", &query.author)] {
             if !value.is_empty() {
@@ -136,6 +163,9 @@ impl Git {
         }
         let args: Vec<_> = args.iter().map(String::as_str).collect();
         let mut commits = parse_commits(&self.bytes(&args).await?)?;
+        if content_search {
+            commits.drain(..query.offset.min(commits.len()));
+        }
         let has_more = commits.len() > PAGE_SIZE;
         commits.truncate(PAGE_SIZE);
         Ok(LogPage { commits, has_more })

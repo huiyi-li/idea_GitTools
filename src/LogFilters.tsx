@@ -9,8 +9,10 @@ export interface LogFilters {
   revision: string;
   merge: 'all' | 'merges' | 'non-merges';
   firstParent: boolean;
+  content: string;
+  contentRegex: boolean;
 }
-export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '', merge: 'all', firstParent: false };
+export const EMPTY_FILTERS: LogFilters = { author: '', since: '', until: '', path: '', revision: '', merge: 'all', firstParent: false, content: '', contentRegex: false };
 interface SavedFilter extends LogFilters {
   name: string;
   search: string;
@@ -47,6 +49,8 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
         revision: record.revision,
         merge: record.merge === 'merges' || record.merge === 'non-merges' ? record.merge : 'all',
         firstParent: record.firstParent === true,
+        content: typeof record.content === 'string' ? record.content : '',
+        contentRegex: record.contentRegex === true,
       }];
     }).slice(0, 20);
   });
@@ -73,11 +77,17 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
           <label key={key}>{label}<input aria-label={label} type={type} value={draft[key]} maxLength={4096}
             placeholder={key === 'path' ? '仓库相对路径' : key === 'revision' ? '至少 4 位 SHA，定位单条提交' : ''}
             onInput={event => { const value = event.currentTarget.value; setDraft(previous => ({ ...previous, [key]: value })); }} /></label>)}
+        <label>代码内容<input aria-label="代码内容" aria-describedby="content-search-help" value={draft.content} maxLength={4096}
+          placeholder="查找引入或删除代码的提交"
+          onInput={event => { const content = event.currentTarget.value; setDraft(previous => ({ ...previous, content })); }} /></label>
+        <label class="checkbox-field"><input type="checkbox" aria-label="代码内容使用正则" checked={draft.contentRegex}
+          onChange={event => { const contentRegex = event.currentTarget.checked; setDraft(previous => ({ ...previous, contentRegex })); }} />按新增／删除行匹配正则</label>
         <label>提交类型<select aria-label="提交类型" value={draft.merge} onChange={event => setDraft(previous => ({ ...previous, merge: event.currentTarget.value as LogFilters['merge'] }))}>
           <option value="all">全部提交</option><option value="merges">仅合并提交</option><option value="non-merges">排除合并提交</option>
         </select></label>
         <label class="checkbox-field"><input type="checkbox" checked={draft.firstParent} onChange={event => setDraft(previous => ({ ...previous, firstParent: event.currentTarget.checked }))} />只显示第一父提交路径</label>
       </div>
+      <p id="content-search-help" class="muted">文本模式查找内容出现次数改变的提交（Git -S）；正则模式匹配新增／删除行（Git -G，POSIX 扩展正则）。沿用 Git 的忽略大小写规则，合并提交与第一父提交比较。留空不限制代码内容，大仓库建议同时限定路径。</p>
       <div class="filter-actions">
         <button type="submit">应用筛选</button>
         <button type="button" onClick={() => { setDraft(EMPTY_FILTERS); setError(''); onApply(EMPTY_FILTERS, '', ''); }}>清除所有筛选</button>
@@ -89,7 +99,7 @@ export function LogFilterPanel({ root, filters, search, branch, onApply }: {
     </form>
     {!!saved.length && <div class="saved-filters" aria-label="已保存筛选">{saved.map(item => <span key={item.name}>
       <button onClick={() => {
-        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision, merge: item.merge, firstParent: item.firstParent };
+        const filters = { author: item.author, since: item.since, until: item.until, path: item.path, revision: item.revision, merge: item.merge, firstParent: item.firstParent, content: item.content, contentRegex: item.contentRegex };
         setDraft(filters);
         onApply(filters, item.search, item.branch);
       }}>{item.name}</button>

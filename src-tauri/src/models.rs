@@ -107,6 +107,10 @@ pub struct LogQuery {
     pub merge: String,
     #[serde(default)]
     pub first_parent: bool,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub content_regex: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

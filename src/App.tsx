@@ -1056,7 +1056,7 @@ export function App() {
                           )}
                         </span>
                         <button aria-expanded={showLogFilters} onClick={() => setShowLogFilters(!showLogFilters)}>
-                          高级筛选{Object.entries(logFilters).some(([key, value]) => key === 'merge' ? value !== 'all' : Boolean(value)) ? ' · 已启用' : ''}
+                          高级筛选{Object.entries(logFilters).some(([key, value]) => key === 'merge' ? value !== 'all' : key !== 'contentRegex' && Boolean(value)) ? ' · 已启用' : ''}
                         </button>
                       </div>
                       {showLogFilters && <LogFilterPanel key={root} root={root} filters={logFilters} search={searchInput} branch={branch}

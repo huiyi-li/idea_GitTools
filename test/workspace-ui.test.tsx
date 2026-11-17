@@ -352,6 +352,97 @@ test('Git Bisect shows the active commit and sends a result action', async () =>
   } finally { render(null, root); }
 });
 
+test('content search applies, saves, restores and clears code filters through the workbench', async () => {
+  const calls = fixture();
+  const latest = () => calls.filter(item => item.command === 'read_log').at(-1)?.args.query;
+  const input = (label: string, value: string) => {
+    const element = root.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+    element.value = value;
+    element.dispatchEvent(new window.Event('input', { bubbles: true }));
+  };
+  try {
+    await waitFor(() => root.querySelector('.commit-row'));
+    button('高级筛选').click();
+    await waitFor(() => root.querySelector('[aria-label="代码内容"]'));
+    input('代码内容', 'token[0]');
+    input('文件或目录路径', 'src/空 格 [x].ts');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    button('应用筛选').click();
+    await waitFor(() => latest()?.content === 'token[0]');
+    assert.equal(latest().contentRegex, false);
+    assert.equal(latest().path, 'src/空 格 [x].ts');
+    input('代码内容', 'token.*');
+    root.querySelector<HTMLInputElement>('[aria-label="代码内容使用正则"]')!.click();
+    input('筛选名称', '查找代码');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    button('应用筛选').click();
+    await waitFor(() => latest()?.contentRegex === true);
+    button('保存筛选').click();
+    await waitFor(() => root.querySelector('.saved-filters'));
+    assert.equal(JSON.parse(localStorage.getItem('log.filters.C:/fixture')!)[0].content, 'token.*');
+    render(null, root);
+    render(<App />, root);
+    await waitFor(() => root.querySelector('.commit-row'));
+    button('高级筛选').click();
+    await waitFor(() => root.querySelector('.saved-filters'));
+    button('查找代码').click();
+    await waitFor(() => latest()?.content === 'token.*');
+    assert.equal(latest().contentRegex, true);
+    assert.equal(root.querySelector<HTMLInputElement>('[aria-label="代码内容使用正则"]')!.checked, true);
+    button('清除所有筛选').click();
+    await waitFor(() => latest()?.content === '');
+    assert.equal(latest().contentRegex, false);
+    assert.equal(latest().offset, 0);
+  } finally { render(null, root); }
+});
+
+test('old saved filters load without code search fields', async () => {
+  const calls = fixture();
+  localStorage.setItem('log.filters.C:/fixture', JSON.stringify([{
+    name: '旧筛选', search: '', branch: '', author: 'Old Author', since: '', until: '', path: '', revision: '',
+  }]));
+  try {
+    await waitFor(() => root.querySelector('.commit-row'));
+    button('高级筛选').click();
+    await waitFor(() => root.querySelector('.saved-filters'));
+    button('旧筛选').click();
+    await waitFor(() => calls.filter(item => item.command === 'read_log').at(-1)?.args.query.author === 'Old Author');
+    const query = calls.filter(item => item.command === 'read_log').at(-1)!.args.query;
+    assert.equal(query.content, '');
+    assert.equal(query.contentRegex, false);
+    assert.equal(query.merge, 'all');
+    assert.equal(query.firstParent, false);
+  } finally { render(null, root); }
+});
+
+test('invalid code regex reports an error and a corrected search recovers', async () => {
+  fixture();
+  const backend = globalThis.testBackend;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'read_log' && args.query.content === '[') throw Error('Invalid regular expression');
+    return backend(command, args);
+  };
+  try {
+    await waitFor(() => root.querySelector('.commit-row'));
+    button('高级筛选').click();
+    await waitFor(() => root.querySelector('[aria-label="代码内容"]'));
+    const input = root.querySelector<HTMLInputElement>('[aria-label="代码内容"]')!;
+    root.querySelector<HTMLInputElement>('[aria-label="代码内容使用正则"]')!.click();
+    input.value = '[';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    button('应用筛选').click();
+    await waitFor(() => root.textContent?.includes('Invalid regular expression'));
+    assert.equal(root.querySelector('.commit-row'), null);
+    assert.equal(input.value, '[');
+    input.value = 'fixed';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    button('应用筛选').click();
+    await waitFor(() => root.querySelector('.commit-row'));
+  } finally { render(null, root); }
+});
+
 test('advanced log filters combine conditions and save repository-specific presets', async () => {
   const calls = fixture();
   try {
