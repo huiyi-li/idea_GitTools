@@ -28,6 +28,24 @@ async fn conflict_at(path: &str) -> (TempDir, Git) {
     (dir, git)
 }
 
+#[test]
+fn file_replacement_overwrites_existing_files_and_preserves_them_on_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let destination = dir.path().join("destination");
+    let source = dir.path().join("source");
+    fs::write(&destination, b"original").unwrap();
+    assert!(replace_file(&source, &destination).is_err());
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
+    fs::create_dir(&source).unwrap();
+    assert!(replace_file(&source, &destination).is_err());
+    assert_eq!(fs::read(&destination).unwrap(), b"original");
+    fs::remove_dir(&source).unwrap();
+    fs::write(&source, b"replacement").unwrap();
+    replace_file(&source, &destination).unwrap();
+    assert_eq!(fs::read(&destination).unwrap(), b"replacement");
+    assert!(!source.exists());
+}
+
 #[tokio::test]
 async fn whole_side_resolution_replaces_an_existing_conflict_file() {
     let (dir, mut git) = conflict().await;

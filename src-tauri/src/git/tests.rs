@@ -179,6 +179,37 @@ async fn submodule_status_is_empty_for_plain_repositories_and_rejects_unsafe_pat
 }
 
 #[tokio::test]
+async fn submodule_paths_with_spaces_are_exact_and_updates_do_not_expand_globs() {
+    let source = fixture();
+    fs::write(source.path().join("file.txt"), "source\n").unwrap();
+    fs::write(source.path().join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
+    run(source.path(), &["add", "."]);
+    run(source.path(), &["commit", "-m", "source"]);
+    let dir = fixture();
+    let path = "libs/空 格 (module)";
+    for target in [path, "libs/other"] {
+        run(dir.path(), &["-c", "protocol.file.allow=always", "submodule", "add", &git_path(source.path()), target]);
+    }
+    run(dir.path(), &["commit", "-am", "submodules"]);
+    let git = open(&dir).await;
+    let modules = git.submodules().await.unwrap();
+    let module = modules.iter().find(|module| module.path == path).unwrap();
+    assert_eq!(module.state, "正常");
+    assert!(module.detail.starts_with('('));
+    run(dir.path(), &["submodule", "deinit", "-f", "--", path, "libs/other"]);
+    let modules = git.submodules().await.unwrap();
+    assert!(modules.iter().any(|module| module.path == path && module.state == "未初始化" && module.detail.is_empty()));
+    assert!(git.update_submodules(vec!["*".into()]).await.is_err());
+    assert!(git.update_submodules(vec![":(glob)**".into()]).await.is_err());
+    assert!(!dir.path().join(path).join(".git").exists());
+    assert!(!dir.path().join("libs/other/.git").exists());
+    git.update_submodules(vec![path.into()]).await.unwrap();
+    assert!(dir.path().join(path).join(".git").exists());
+    assert!(!dir.path().join("libs/other/.git").exists());
+    assert_eq!(fs::read_to_string(dir.path().join(path).join("file.txt")).unwrap(), "source\n");
+}
+
+#[tokio::test]
 async fn bisect_can_start_report_and_reset_without_leaking_remote_data() {
     let dir = fixture();
     let git = open(&dir).await;
@@ -209,6 +240,8 @@ async fn diagnostics_reports_repository_state_without_remote_urls() {
     assert_eq!(diagnostics.root, git.root_string());
     assert_eq!(diagnostics.branch.as_deref(), Some("main"));
     assert_eq!(diagnostics.changed_files, 1);
+    assert_eq!(diagnostics.staged_files, 0);
+    assert_eq!(diagnostics.unstaged_files, 1);
     assert_eq!(diagnostics.remote_names, vec!["origin"]);
     assert_eq!(diagnostics.worktree_count, 1);
     assert!(!format!("{diagnostics:?}").contains("secret"));

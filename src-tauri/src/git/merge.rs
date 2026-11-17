@@ -672,22 +672,8 @@ pub(super) fn atomic_write(
 
 fn replace_file(source: impl AsRef<Path>, destination: &Path) -> Result<(), String> {
     let source = source.as_ref();
-    #[cfg(windows)]
-    if destination.exists() {
-        let backup = NamedTempFile::new_in(destination.parent().ok_or("文件路径错误")?)
-            .map_err(|e| e.to_string())?;
-        fs::copy(destination, backup.path()).map_err(|e| e.to_string())?;
-        let backup = backup.into_temp_path();
-        fs::remove_file(destination).map_err(|e| e.to_string())?;
-        return match fs::rename(source, destination) {
-            Ok(()) => Ok(()),
-            Err(error) => match fs::rename(&backup, destination) {
-                Ok(()) => Err(error.to_string()),
-                Err(recovery) => Err(format!(
-                    "替换文件失败：{error}。恢复原文件失败：{recovery}"
-                )),
-            },
-        };
+    if !fs::symlink_metadata(source).map_err(|e| e.to_string())?.file_type().is_file() {
+        return Err("替换来源必须是普通文件".into());
     }
     fs::rename(source, destination).map_err(|e| e.to_string())
 }

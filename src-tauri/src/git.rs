@@ -270,28 +270,24 @@ impl Git {
             .await?
             .checked()?;
         let text = String::from_utf8(output).map_err(|_| "Submodule 状态不是 UTF-8 文本")?;
-        Ok(text
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim_start();
-                let mut fields = line.splitn(3, char::is_whitespace);
-                let raw = fields.next()?.trim();
-                if raw.is_empty() {
-                    return None;
-                }
-                let (state, commit) = match raw.chars().next()? {
-                    '-' => ("未初始化", raw[1..].to_owned()),
-                    '+' => ("已修改", raw[1..].to_owned()),
-                    'U' => ("冲突", raw[1..].to_owned()),
-                    _ => ("正常", raw.to_owned()),
-                };
-                let rest = fields.next()?.trim_start();
-                let mut path_and_detail = rest.splitn(2, char::is_whitespace);
-                let path = path_and_detail.next()?.to_owned();
-                let detail = path_and_detail.next().unwrap_or_default().trim().to_owned();
-                Some(SubmoduleStatus { path, commit, state: state.into(), detail })
-            })
-            .collect())
+        text.lines().filter(|line| !line.is_empty()).map(|line| {
+            let state = match line.as_bytes().first() {
+                Some(b' ') => "正常",
+                Some(b'-') => "未初始化",
+                Some(b'+') => "已修改",
+                Some(b'U') => "冲突",
+                _ => return Err("无法解析 Submodule 状态".into()),
+            };
+            let (commit, remainder) = line[1..].split_once(' ').ok_or("Submodule 路径缺失")?;
+            validate_hash(commit)?;
+            let (path, detail) = if matches!(line.as_bytes()[0], b' ' | b'+') && remainder.ends_with(')') {
+                remainder.rsplit_once(" (").map(|(path, detail)| (path, format!("({detail}"))).unwrap_or((remainder, String::new()))
+            } else {
+                (remainder, String::new())
+            };
+            validate_path(path)?;
+            Ok(SubmoduleStatus { path: path.into(), commit: commit.into(), state: state.into(), detail })
+        }).collect()
     }
 
     pub async fn update_submodules(&self, paths: Vec<String>) -> Result<(), String> {
@@ -301,7 +297,11 @@ impl Git {
         for path in &paths {
             validate_path(path)?;
         }
-        let mut args = vec!["submodule", "update", "--init", "--recursive", "--"];
+        let modules = self.submodules().await?;
+        if paths.iter().any(|path| !modules.iter().any(|module| module.path == *path)) {
+            return Err("子模块列表已改变或所选路径无效，请重新读取".into());
+        }
+        let mut args = vec!["--literal-pathspecs", "submodule", "update", "--init", "--recursive", "--checkout", "--"];
         args.extend(paths.iter().map(String::as_str));
         self.bytes(&args).await?;
         Ok(())
@@ -436,7 +436,7 @@ impl Git {
             staged_files: status
                 .changes
                 .iter()
-                .filter(|change| change.index != ' ')
+                .filter(|change| change.index != ' ' && change.index != '?' && !change.conflict)
                 .count(),
             unstaged_files: status
                 .changes
