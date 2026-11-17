@@ -31,6 +31,7 @@ import { InteractiveRebase } from './InteractiveRebase';
 import { FileHistoryDialog } from './FileHistoryDialog';
 import { LocalHistoryDialog } from './LocalHistoryDialog';
 import { MultiRepositoryDialog } from './MultiRepositoryDialog';
+import { RepositoryWorkspaceDialog, WorkspaceRepositoryBar, type WorkspaceRepositories } from './RepositoryWorkspace';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
@@ -53,6 +54,22 @@ const HostingView = lazy(() => import('./hosting/HostingView'));
 const CommitReviewViewer = lazy(() => import('./review/CommitReviewViewer'));
 type View = 'log' | 'changes';
 type Dialog = { kind: 'branch' | 'stash' | 'shelf'; value: string };
+interface RepositorySession {
+  view: View;
+  target: DiffTarget | null;
+  selected: string | null;
+  offset: number;
+  search: string;
+  searchInput: string;
+  branch: string;
+  filters: LogFilters;
+  activeChangeList: string;
+}
+function readRepositoryDraft(root: string): string {
+  if (!root) return '';
+  const value = readSaved<unknown>(`commit.draft.${root}`, '');
+  return typeof value === 'string' ? value : '';
+}
 
 function ChangeList({
   changes,
@@ -172,7 +189,7 @@ export function App() {
   const [loadingLog, setLoadingLog] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [target, setTarget] = useState<DiffTarget | null>(null);
-  const [message, setMessage] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [messageHistory, setMessageHistory] = useState<string[]>([]);
   const [changeLists, setChangeLists] = useState<ChangeListGroup[]>([]);
   const [activeChangeList, setActiveChangeList] = useState('');
@@ -214,6 +231,9 @@ export function App() {
   const [fileHistory, setFileHistory] = useState(false);
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [showMultiRepository, setShowMultiRepository] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  const [workspace, setWorkspace] = useState<WorkspaceRepositories | null>(null);
+  const sessions = useRef(new Map<string, RepositorySession>());
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
@@ -225,24 +245,21 @@ export function App() {
   const activeRoot = useRef('');
   const startupOpen = useRef(true);
   const root = status?.repository.root ?? '';
+  const message = drafts[root] ?? readRepositoryDraft(root);
+  function setRepositoryMessage(repository: string, value: string) {
+    if (!repository) return;
+    setDrafts(previous => ({ ...previous, [repository]: value }));
+    try { save(`commit.draft.${repository}`, value); }
+    catch { setError('提交草稿已保留在当前会话，但无法保存到本机设置。'); }
+  }
+  function setMessage(value: string | ((previous: string) => string)) {
+    if (root === activeRoot.current) setRepositoryMessage(root, typeof value === 'function' ? value(message) : value);
+  }
 
   useEffect(() => {
     document.body.className = theme === 'light' ? 'ij-light' : 'ij-dark';
     save('theme', theme);
   }, [theme]);
-
-  useEffect(() => {
-    if (!root) {
-      setChangeLists([]);
-      setActiveChangeList('');
-      return;
-    }
-    const next = readChangeLists(root);
-    setChangeLists(next);
-    setActiveChangeList((current) => next.some((list) => list.id === current) ? current : '');
-    const savedMessages = readSaved<unknown>(`commit.messages.${root}`, []);
-    setMessageHistory(Array.isArray(savedMessages) ? savedMessages.filter((item): item is string => typeof item === 'string').slice(0, 30) : []);
-  }, [root]);
 
   useEffect(() => {
     try { save('log.diffPreview', diffPreview); } catch { /* Keep the session preference. */ }
@@ -313,7 +330,7 @@ export function App() {
     }
   }
 
-  async function openPath(path?: string, waitForRefresh = false, initial = false) {
+  async function openPath(path?: string, waitForRefresh = false, initial = false, exactRoot = false) {
     if (!initial) startupOpen.current = false;
     while (waitForRefresh && gate.current) {
       pendingRefresh.current = false;
@@ -323,23 +340,35 @@ export function App() {
       // Keep the operation lock while the native dialog restores window focus.
       const selectedPath = path ?? await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
       if (typeof selectedPath !== 'string') return;
-      const next = await call<Status>('open_repository', { path: selectedPath });
-      if (initial && !startupOpen.current) return;
+      if (root && root === activeRoot.current) {
+        sessions.current.set(root, { view, target, selected, offset, search, searchInput, branch, filters: logFilters, activeChangeList });
+      }
+      const next = await call<Status>('open_repository', { path: selectedPath, ...(exactRoot ? { exactRoot: true } : {}) });
+      const restored = sessions.current.get(next.repository.root);
+      const lists = readChangeLists(next.repository.root);
+      const savedMessages = readSaved<unknown>(`commit.messages.${next.repository.root}`, []);
       activeRoot.current = next.repository.root;
       setStatus(next);
       setPage(EMPTY_PAGE);
-      setSelected(null);
+      setSelected(restored?.selected ?? null);
       setDetails(null);
-      setTarget(null);
-      setMessage('');
+      setView(restored?.view ?? view);
+      setLoadingLog(true);
+      setLoadingDetails(false);
+      const nextTarget = restored?.target;
+      setTarget(nextTarget && (nextTarget.revision !== null || next.changes.some(change => change.path === nextTarget.path &&
+        (nextTarget.area === 'staged' ? staged(change) : unstaged(change)))) ? nextTarget : null);
+      setChangeLists(lists);
+      setActiveChangeList(lists.some(list => list.id === restored?.activeChangeList) ? restored!.activeChangeList : '');
+      setMessageHistory(Array.isArray(savedMessages) ? savedMessages.filter((item): item is string => typeof item === 'string').slice(0, 30) : []);
       setChangeListTarget(null);
       setNewChangeListDialog(false);
       setNewChangeListName('');
-      setOffset(0);
-      setBranch('');
-      setSearch('');
-      setSearchInput('');
-      setLogFilters(EMPTY_FILTERS);
+      setOffset(restored?.offset ?? 0);
+      setBranch(restored?.branch ?? '');
+      setSearch(restored?.search ?? '');
+      setSearchInput(restored?.searchInput ?? '');
+      setLogFilters(restored?.filters ?? EMPTY_FILTERS);
       setShowLogFilters(false);
       setDialog(null);
       setOperationDialog(null);
@@ -361,10 +390,27 @@ export function App() {
       setBranchDialog(null);
       setReview(null);
       setLocalHistoryPath(null);
+      setShowRemotes(false);
+      setShowManager(false);
+      setManagerStash(undefined);
+      setManagerRevision('');
+      setShowDiagnostics(false);
+      setShowBisect(false);
+      setShowSubmodules(false);
+      setHunks(null);
+      setShowAmend(false);
+      setShowInteractive(false);
+      setInteractiveBase('');
+      setInteractiveAction(undefined);
+      setFileHistory(false);
+      setTransfer(null);
+      setShowMultiRepository(false);
+      setWorkspace(previous => previous?.repositories.some(repository => repository.root === next.repository.root) ? previous : null);
       setVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
-      save('recent', paths);
+      try { save('recent', paths); }
+      catch { setNotice('仓库已打开，但无法保存最近仓库列表。'); }
     });
   }
 
@@ -405,8 +451,8 @@ export function App() {
     label: string,
     openConflicts = false,
   ) {
-    const path = activeRoot.current;
-    if (!path) return false;
+    const path = root;
+    if (!path || path !== activeRoot.current) return false;
     return perform(label, async () => {
       try {
         const result = await call<unknown>(command, { root: path, ...args });
@@ -433,8 +479,8 @@ export function App() {
   }
 
   async function previewDiscard(paths: string[], mode: DiscardMode) {
-    const path = activeRoot.current;
-    if (!path) return;
+    const path = root;
+    if (!path || path !== activeRoot.current) return;
     await perform('读取放弃更改预览', async () => {
       const preview = await call<DiscardPreview>('preview_discard', { root: path, paths, mode });
       if (activeRoot.current !== path) return;
@@ -491,8 +537,8 @@ export function App() {
   }
 
   async function commit(list?: ChangeListGroup, pushAfter = false) {
-    const path = activeRoot.current;
-    if (!path) return;
+    const path = root;
+    if (!path || path !== activeRoot.current || status?.repository.root !== path) return;
     const allStaged = status?.changes.filter(staged) ?? [];
     const selectedFiles = allStaged.filter((change) => pathMatchesList(change, list));
     if (!selectedFiles.length) return;
@@ -511,12 +557,12 @@ export function App() {
         await refresh(path).catch((e) => setError(String(e)));
       }
     });
-    if (success && pushAfter) setTransfer('push');
+    if (success && pushAfter && activeRoot.current === path) setTransfer('push');
   }
 
   async function generateCommitMessage() {
-    const path = activeRoot.current;
-    if (!path) return;
+    const path = root;
+    if (!path || path !== activeRoot.current) return;
     await perform('生成提交说明', async () => {
       const suggestion = await call<string>('generate_commit_message', { root: path });
       setMessage(suggestion);
@@ -596,8 +642,8 @@ export function App() {
   }
 
   async function previewNavigation(target: string, action: NavigationAction = 'checkout', creating = false) {
-    const path = activeRoot.current;
-    if (!path) return;
+    const path = root;
+    if (!path || path !== activeRoot.current) return;
     await perform('预览 Git 操作', async () => {
       const preview = await call<NavigationPreview>('preview_navigation', { root: path, target, action });
       if (activeRoot.current !== path) return;
@@ -611,7 +657,8 @@ export function App() {
   }
 
   async function runNavigation(request: NavigationRequest) {
-    const path = activeRoot.current;
+    const path = request.preview.root;
+    if (!path || path !== root || path !== activeRoot.current) return;
     await perform(request.preview.action === 'reset' ? 'Reset' : '签出', async () => {
       setNavigationError('');
       try {
@@ -631,7 +678,7 @@ export function App() {
         const next = path || session?.root;
         if (!startupOpen.current) return;
         if (next && await openPath(next, false, true)) {
-          if (session && (!path || path === session.root)) setMessage(session.message);
+          if (session && (!path || path === session.root) && activeRoot.current === session.root) setRepositoryMessage(session.root, session.message);
           if (session) save(UPDATE_SESSION, null);
         }
       })
@@ -639,12 +686,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (searchInput === search) return;
     const timer = setTimeout(() => {
+      if (activeRoot.current !== root) return;
       setSearch(searchInput);
       setOffset(0);
     }, 250);
     return () => clearTimeout(timer);
-  }, [searchInput]);
+  }, [root, searchInput, search]);
 
   useEffect(() => {
     let current = true;
@@ -835,6 +884,7 @@ export function App() {
           </span>
         )}
         <div class="header-actions">
+          <ToolButton icon="nodes/folder" label="打开工作区文件夹" disabled={!!busy} onClick={() => { startupOpen.current = false; setShowWorkspace(true); }}><span>工作区</span></ToolButton>
           <ActionMenu label="仓库工具" text="仓库" disabled={!root || !!busy}>
             <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
             <button onClick={() => openManager('branches')}>分支、标签与 Stash</button>
@@ -845,7 +895,7 @@ export function App() {
             <button onClick={() => { setInteractiveBase(''); setInteractiveAction(undefined); setShowInteractive(true); }}>交互式 Rebase</button>
             <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
             <button onClick={() => setLocalHistoryPath('')}>Local History</button>
-            <button onClick={() => setShowMultiRepository(true)}>多仓库同步与提交图</button>
+            <button onClick={() => setShowMultiRepository(true)}>批量远程同步与跨仓库记录</button>
             <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
             <button onClick={() => setShowBisect(true)}>Bisect</button>
             <button onClick={() => setShowSubmodules(true)}>Submodule 管理</button>
@@ -900,6 +950,10 @@ export function App() {
         </div>
       </header>
 
+      {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy}
+        onSelect={path => { if (path !== root) void openPath(path, false, false, true); }}
+        onManage={() => setShowWorkspace(true)} onClose={() => setWorkspace(null)} />}
+
       {error && (
         <div class="message error-message" role="alert">
           <span>{error}</span>
@@ -930,6 +984,7 @@ export function App() {
             <h1>IdeaGitTool</h1>
           </div>
           <p>Git 工作区</p>
+          <button disabled={!!busy} onClick={() => { startupOpen.current = false; setShowWorkspace(true); }}>打开包含多个仓库的文件夹</button>
           <button disabled={!!busy} onClick={() => setShowClone(true)}>克隆远程仓库</button>
           <button class="primary" disabled={!!busy} onClick={() => void chooseRepository()}>
             <Icon name="general/open" />
@@ -1099,7 +1154,7 @@ export function App() {
                       </div>
                     </section>
                     {diffPreview && mergePath === null && !review ? (
-                      <DiffView root={root} target={target} version={version} />
+                      <DiffView key={root} root={root} target={target} version={version} />
                     ) : (
                       <div />
                     )}
@@ -1308,6 +1363,7 @@ export function App() {
                     </details>
                   </div>
                   <div class="commit-panel">
+                    <div class="commit-repository-boundary" aria-label="本次提交仓库"><strong>仅提交当前仓库</strong><span class="mono selectable">{root}</span><small>{status.repository.branch ?? 'Detached HEAD'} · 不包含工作区其他仓库</small></div>
                     <label for="commit-message">提交说明</label>
                     <label class="commit-history-field">
                       提交说明历史
@@ -1354,7 +1410,7 @@ export function App() {
                     </button>
                   </div>
                 </section>
-                {mergePath === null ? <DiffView root={root} target={target} version={version} /> : <div />}
+                {mergePath === null ? <DiffView key={root} root={root} target={target} version={version} /> : <div />}
               </Split>
             )}
           </div>
@@ -1386,7 +1442,7 @@ export function App() {
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
             (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
-              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository || mergePath !== null || review ||
+              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository || showWorkspace || mergePath !== null || review ||
               dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
           beforeInstall={() => {
@@ -1408,6 +1464,19 @@ export function App() {
             }
           }} />
       </footer>
+      {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} currentRoot={root} onClose={() => setShowWorkspace(false)}
+        onOpen={async (nextWorkspace, repository, depth) => {
+          const success = await openPath(repository.root, false, false, true);
+          if (success && activeRoot.current === repository.root) {
+            setWorkspace(nextWorkspace);
+            try {
+              save('workspace.lastFolder', nextWorkspace.root);
+              save('workspace.scanDepth', depth);
+            } catch { setNotice('工作区已打开，本次无法记住路径和扫描层级。'); }
+            return true;
+          }
+          return false;
+        }} />}
       {showClone && <CloneDialog onOpen={(path) => openPath(path, true)} onClose={() => setShowClone(false)} />}
       {showRemotes && root && <RemoteDialog key={root} root={root} onClose={() => setShowRemotes(false)} onChanged={() => refresh(root)} />}
       {showDiagnostics && root && <DiagnosticsDialog key={root} root={root} onClose={() => setShowDiagnostics(false)} />}

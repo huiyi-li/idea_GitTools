@@ -1352,6 +1352,22 @@ input[type='checkbox'] {
 .bisect-results { display: flex; flex-wrap: wrap; gap: 8px; }
 .bisect-results > button { border-color: var(--border-control); padding: 7px 14px; }
 .bisect-dialog .transport-form input { width: 100%; min-width: 0; }
+.workspace-scan-form { margin-top: 18px; }
+.workspace-scan-form input { min-width: 0; width: 100%; }
+.workspace-scan-options { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.workspace-scan-options > label { margin-right: auto; }
+.workspace-repository-list { display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.workspace-repository-item { display: flex; gap: 14px; justify-content: space-between; align-items: center; border: 1px solid var(--border-control); padding: 12px; text-align: left; white-space: normal; }
+.workspace-repository-item > span:first-child { display: grid; gap: 6px; min-width: 0; }
+.workspace-repository-item small { color: var(--fg-info); overflow-wrap: anywhere; }
+.workspace-repository-item > span:last-child { flex-shrink: 0; color: var(--fg-info); }
+.workspace-repository-bar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg); font-size: 12px; }
+.workspace-folder { max-width: 30vw; }
+.workspace-repository-bar label { display: flex; align-items: center; gap: 8px; }
+.workspace-repository-bar select { min-width: 180px; max-width: 35vw; color: var(--fg); background: var(--bg-input); border: 1px solid var(--border-control); border-radius: 4px; padding: 5px 8px; }
+.commit-repository-boundary { display: grid; gap: 5px; padding: 9px; border: 1px solid var(--border-control); border-left: 3px solid var(--accent); border-radius: 4px; font-size: 12px; }
+.commit-repository-boundary span { overflow-wrap: anywhere; }
+.commit-repository-boundary small { color: var(--fg-info); }
 @media (max-width: 600px) {
   .modal.utility-dialog { padding: 14px; }
   .diagnostics-grid { grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 8px; }

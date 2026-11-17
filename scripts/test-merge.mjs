@@ -11,6 +11,7 @@ try {
     'merge.test',
     'merge-ui.test',
     'workspace-ui.test',
+    'workspace-repositories.test',
     'utility-ui.test',
     'analysis.test',
     'diff-ui.test',
@@ -25,7 +26,7 @@ try {
     entryPoints: [
       ...tests.map(
         (name) =>
-          `test/${name}.${['workspace-ui.test', 'utility-ui.test', 'diff-ui.test', 'minimap.test', 'hosting-ui.test', 'review-ui.test', 'navigation-ui.test', 'transport-ui.test', 'updater-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
+          `test/${name}.${['workspace-ui.test', 'workspace-repositories.test', 'utility-ui.test', 'diff-ui.test', 'minimap.test', 'hosting-ui.test', 'review-ui.test', 'navigation-ui.test', 'transport-ui.test', 'updater-ui.test'].includes(name) ? 'tsx' : 'ts'}`,
       ),
       'test/analysis-worker.ts',
     ],
