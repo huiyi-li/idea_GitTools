@@ -100,6 +100,15 @@ impl Git {
         Ok(git)
     }
 
+    pub async fn open_exact(path: &str, app: Option<tauri::AppHandle>) -> Result<Self, String> {
+        let expected = Path::new(path).canonicalize().map_err(|error| error.to_string())?;
+        let git = Self::open(path, app).await?;
+        if git.root != expected {
+            return Err("所选目录不再是独立仓库根目录，请重新扫描工作区。不会改为打开父仓库。".into());
+        }
+        Ok(git)
+    }
+
     pub fn root_string(&self) -> String {
         // Git and the UI use ordinary Windows paths, including for canonical paths.
         git_path(&self.root)
@@ -727,6 +736,16 @@ impl Git {
         }
         for path in &paths {
             validate_path(path)?;
+        }
+        if !unstage {
+            let mut inspect = vec!["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--"];
+            inspect.extend(paths.iter().map(String::as_str));
+            let untracked = self.text(&inspect).await?;
+            for path in untracked.split('\0').filter(|path| path.ends_with('/')) {
+                if self.root.join(path).join(".git").exists() {
+                    return Err(format!("{path} 是独立子仓库，请先在工作区中选择该仓库，再暂存和提交。"));
+                }
+            }
         }
         let head = self.repository().await?.head;
         let mut args = if !unstage {

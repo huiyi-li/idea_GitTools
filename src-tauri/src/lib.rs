@@ -5,6 +5,9 @@ pub mod transport;
 #[cfg(test)]
 mod update_tests;
 mod watcher;
+mod workspace;
+#[cfg(test)]
+mod repository_scope_tests;
 
 use git::discard::{DiscardMode, DiscardPreview};
 use git::history::{BranchComparison, HistoryAction, HistoryRequest};
@@ -42,11 +45,16 @@ fn active<'a>(git: &'a Option<Git>, root: &str) -> Result<&'a Git, String> {
 #[tauri::command]
 async fn open_repository(
     path: String,
+    exact_root: Option<bool>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Status, String> {
     let mut current = state.0.lock().await;
-    let mut git = Git::open(&path, Some(app.clone())).await?;
+    let mut git = if exact_root.unwrap_or(false) {
+        Git::open_exact(&path, Some(app.clone())).await?
+    } else {
+        Git::open(&path, Some(app.clone())).await?
+    };
     let status = git.status().await?;
     if let Err(error) = git.start_watching().await {
         use tauri::Emitter;
@@ -57,6 +65,11 @@ async fn open_repository(
     }
     *current = Some(git);
     Ok(status)
+}
+
+#[tauri::command]
+async fn discover_workspace(path: String, max_depth: Option<usize>) -> Result<workspace::WorkspaceRepositories, String> {
+    workspace::discover(&path, max_depth.unwrap_or(4)).await
 }
 
 #[tauri::command]
@@ -164,17 +177,28 @@ async fn write_patch_file(
         .await
 }
 
+async fn checked_repositories(roots: Vec<String>) -> Result<Vec<Git>, String> {
+    if roots.is_empty() || roots.len() > 32 {
+        return Err("请选择 1 到 32 个仓库".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut repositories = Vec::new();
+    for root in roots {
+        let git = Git::open_exact(&root, None).await?;
+        if seen.insert(git.root.clone()) {
+            repositories.push(git);
+        }
+    }
+    Ok(repositories)
+}
+
 #[tauri::command]
 async fn multi_repository_log(
     roots: Vec<String>,
     query: LogQuery,
 ) -> Result<Vec<MultiRepositoryCommit>, String> {
-    if roots.is_empty() || roots.len() > 32 {
-        return Err("请选择 1 到 32 个仓库".into());
-    }
     let mut commits = Vec::new();
-    for root in roots {
-        let git = Git::open(&root, None).await?;
+    for git in checked_repositories(roots).await? {
         let page = git.log(query.clone()).await?;
         let name = git.root.file_name().and_then(|value| value.to_str()).unwrap_or("仓库").to_owned();
         commits.extend(page.commits.into_iter().map(|commit| MultiRepositoryCommit {
@@ -189,22 +213,22 @@ async fn multi_repository_log(
 }
 
 #[tauri::command]
-async fn multi_repository_sync(roots: Vec<String>, action: String) -> Result<Vec<String>, String> {
+async fn multi_repository_sync(roots: Vec<String>, action: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
     if roots.is_empty() || roots.len() > 32 {
         return Err("请选择 1 到 32 个仓库".into());
     }
     if !matches!(action.as_str(), "fetch" | "pull" | "push") {
         return Err("不支持的多仓库同步操作".into());
     }
+    let _lease = state.0.lock().await;
+    let repositories = checked_repositories(roots).await?;
     let mut results = Vec::new();
-    for root in roots {
-        let git = Git::open(&root, None).await?;
-        let name = git.root.file_name().and_then(|value| value.to_str()).unwrap_or("仓库");
-        let output = git.remote_action(&action).await?;
-        results.push(if output.is_empty() {
-            format!("{name}: 完成")
-        } else {
-            format!("{name}: {output}")
+    for git in repositories {
+        let root = git.root_string();
+        results.push(match git.remote_action(&action).await {
+            Ok(output) if output.is_empty() => format!("{root}: 完成"),
+            Ok(output) => format!("{root}: {output}"),
+            Err(error) => format!("{root}: 失败：{error}"),
         });
     }
     Ok(results)
@@ -1024,6 +1048,7 @@ pub fn run() {
             file_blame,
             fetch_review_branch,
             initial_repository,
+            discover_workspace,
             open_release_page,
             open_repository,
             repository_status,

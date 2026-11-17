@@ -56,6 +56,76 @@ pub(crate) fn request(path: &str) -> DiffRequest {
 }
 
 #[tokio::test]
+async fn workspace_commits_keep_sibling_indexes_and_same_name_files_independent() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut repositories = Vec::new();
+    for name in ["A", "B"] {
+        let root = workspace.path().join(name);
+        fs::create_dir(&root).unwrap();
+        run(&root, &["init", "-b", "main"]);
+        run(&root, &["config", "user.name", "Workspace Test"]);
+        run(&root, &["config", "user.email", "test@example.test"]);
+        run(&root, &["config", "commit.gpgsign", "false"]);
+        run(&root, &["config", "core.autocrlf", "false"]);
+        run(&root, &["config", "core.hooksPath", ".git/hooks"]);
+        fs::write(root.join("shared.txt"), format!("{name} base\n")).unwrap();
+        let git = Git::open_exact(root.to_str().unwrap(), None).await.unwrap();
+        git.stage(vec!["shared.txt".into()], false).await.unwrap();
+        git.commit("base").await.unwrap();
+        fs::write(root.join("shared.txt"), format!("{name} staged\n")).unwrap();
+        git.stage(vec!["shared.txt".into()], false).await.unwrap();
+        fs::write(root.join("shared.txt"), format!("{name} worktree\n")).unwrap();
+        repositories.push(git);
+    }
+    let a = &repositories[0];
+    let b = &repositories[1];
+    let a_head = a.head().await.unwrap();
+    let a_index = fs::read(a.root.join(".git/index")).unwrap();
+    b.commit("B independent commit").await.unwrap();
+    assert_eq!(a.head().await.unwrap(), a_head);
+    assert_eq!(fs::read(a.root.join(".git/index")).unwrap(), a_index);
+    assert_eq!(fs::read_to_string(a.root.join("shared.txt")).unwrap(), "A worktree\n");
+    assert_eq!(run(&b.root, &["show", "HEAD:shared.txt"]), "B staged\n");
+    assert_eq!(run(&a.root, &["show", ":shared.txt"]), "A staged\n");
+    let a_diff = a.diff(request("shared.txt")).await.unwrap();
+    let b_diff = b.diff(request("shared.txt")).await.unwrap();
+    assert_eq!(a_diff.after, "A worktree\n");
+    assert_eq!(b_diff.after, "B worktree\n");
+    let b_head = b.head().await.unwrap();
+    let b_index = fs::read(b.root.join(".git/index")).unwrap();
+    a.commit("A independent commit").await.unwrap();
+    assert_eq!(b.head().await.unwrap(), b_head);
+    assert_eq!(fs::read(b.root.join(".git/index")).unwrap(), b_index);
+    assert_eq!(run(&a.root, &["show", "HEAD:shared.txt"]), "A staged\n");
+}
+
+#[tokio::test]
+async fn workspace_exact_open_and_staging_refuse_nested_repository_fallback() {
+    let parent = fixture();
+    fs::write(parent.path().join("parent.txt"), "parent").unwrap();
+    run(parent.path(), &["add", "."]);
+    run(parent.path(), &["commit", "-m", "base"]);
+    let child = parent.path().join("group/child");
+    fs::create_dir_all(&child).unwrap();
+    assert!(Git::open_exact(child.to_str().unwrap(), None).await.is_err());
+    run(&child, &["init", "-b", "main"]);
+    run(&child, &["config", "user.name", "Child"]);
+    run(&child, &["config", "user.email", "child@example.test"]);
+    fs::write(child.join("child.txt"), "child").unwrap();
+    run(&child, &["add", "."]);
+    run(&child, &["-c", "commit.gpgsign=false", "-c", "core.hooksPath=.git/hooks", "commit", "-m", "child"]);
+    let git = open(&parent).await;
+    let index = fs::read(parent.path().join(".git/index")).unwrap();
+    for path in ["group/child/", "group"] {
+        assert!(git.stage(vec![path.into()], false).await.unwrap_err().contains("独立子仓库"));
+    }
+    assert_eq!(fs::read(parent.path().join(".git/index")).unwrap(), index);
+    assert_eq!(Git::open_exact(child.to_str().unwrap(), None).await.unwrap().root, child.canonicalize().unwrap());
+    fs::rename(child.join(".git"), child.join("git-metadata-backup")).unwrap();
+    assert!(Git::open_exact(child.to_str().unwrap(), None).await.is_err());
+}
+
+#[tokio::test]
 async fn unborn_repository_stage_unstage_and_first_commit() {
     let dir = fixture();
     let git = open(&dir).await;
