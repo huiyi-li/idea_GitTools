@@ -27,6 +27,16 @@ pub struct WorkspaceRepository {
     pub relative_path: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositorySummary {
+    pub root: String,
+    pub branch: Option<String>,
+    pub changed_files: usize,
+    pub staged_files: usize,
+    pub conflicts: usize,
+}
+
 impl WorkspaceRepositories {
     fn warn(&mut self, warning: String) {
         if self.warnings.len() < MAX_WARNINGS {

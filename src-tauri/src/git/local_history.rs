@@ -31,11 +31,9 @@ pub struct RestorePreview {
 }
 
 async fn history_dir(git: &Git) -> Result<PathBuf, String> {
-    let directory = git.root.join(
-        git.text(&["rev-parse", "--git-path", "ideagittool-local-history"])
-            .await?
-            .trim(),
-    );
+    let directory = git.local_history_directory.get_or_try_init(|| async {
+        Ok::<PathBuf, String>(git.root.join(git.text(&["rev-parse", "--git-path", "ideagittool-local-history"]).await?.trim()))
+    }).await?.clone();
     match fs::symlink_metadata(&directory) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
         Ok(_) => return Err("本地历史目录不能是符号链接或普通文件".into()),

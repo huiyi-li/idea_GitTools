@@ -33,6 +33,7 @@ pub struct Git {
     pub app: Option<tauri::AppHandle>,
     watcher: Option<crate::watcher::RepositoryWatcher>,
     merge_session: Option<merge::MergeSession>,
+    local_history_directory: tokio::sync::OnceCell<PathBuf>,
 }
 
 struct Output {
@@ -92,6 +93,7 @@ impl Git {
             app,
             watcher: None,
             merge_session: None,
+            local_history_directory: tokio::sync::OnceCell::new(),
         };
         let root = git.text(&["rev-parse", "--show-toplevel"]).await?;
         git.root = Path::new(root.trim())
@@ -387,6 +389,23 @@ impl Git {
             self.bytes(&["bisect", "reset"]).await?;
         }
         Ok(())
+    }
+
+    pub async fn workspace_summary(&self) -> Result<crate::workspace::RepositorySummary, String> {
+        let branch = self.execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None).await?;
+        let branch = match branch.code {
+            0 => Some(String::from_utf8_lossy(&branch.stdout).trim().to_owned()),
+            1 => None,
+            _ => { branch.checked()?; unreachable!() },
+        };
+        let changes = parse_status(&self.bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"]).await?)?;
+        let unique = |predicate: fn(&Change) -> bool| changes.iter().filter(|change| predicate(change)).map(|change| &change.path).collect::<std::collections::HashSet<_>>().len();
+        Ok(crate::workspace::RepositorySummary {
+            root: self.root_string(), branch,
+            changed_files: unique(|_| true),
+            staged_files: unique(|change| change.index != ' ' && change.index != '?' && !change.conflict),
+            conflicts: unique(|change| change.conflict),
+        })
     }
 
     pub async fn diagnostics(&self) -> Result<Diagnostics, String> {

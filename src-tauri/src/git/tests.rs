@@ -300,6 +300,24 @@ async fn bisect_can_start_report_and_reset_without_leaking_remote_data() {
 }
 
 #[tokio::test]
+async fn workspace_summary_counts_unique_paths_without_writing_the_index() {
+    let dir = fixture();
+    let git = open(&dir).await;
+    fs::write(dir.path().join("same.txt"), "base\n").unwrap();
+    git.stage(vec!["same.txt".into()], false).await.unwrap();
+    git.commit("base").await.unwrap();
+    run(dir.path(), &["rm", "same.txt"]);
+    fs::write(dir.path().join("same.txt"), "untracked replacement\n").unwrap();
+    let index = fs::read(dir.path().join(".git/index")).unwrap();
+    let summary = git.workspace_summary().await.unwrap();
+    assert_eq!(summary.changed_files, 1);
+    assert_eq!(summary.staged_files, 1);
+    assert_eq!(summary.conflicts, 0);
+    assert_eq!(summary.branch.as_deref(), Some("main"));
+    assert_eq!(fs::read(dir.path().join(".git/index")).unwrap(), index);
+}
+
+#[tokio::test]
 async fn diagnostics_reports_repository_state_without_remote_urls() {
     let dir = fixture();
     let git = open(&dir).await;

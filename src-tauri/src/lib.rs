@@ -38,7 +38,7 @@ struct AppState(std::sync::Arc<Mutex<Option<Git>>>);
 
 fn active<'a>(git: &'a Option<Git>, root: &str) -> Result<&'a Git, String> {
     git.as_ref()
-        .filter(|g| g.root_string() == root)
+        .filter(|g| g.root_string() == root && g.root.join(".git").exists() && g.root.canonicalize().is_ok_and(|path| path == g.root))
         .ok_or_else(|| "Repository changed. Refresh and retry the operation.".into())
 }
 
@@ -65,6 +65,21 @@ async fn open_repository(
     }
     *current = Some(git);
     Ok(status)
+}
+
+#[tauri::command]
+async fn workspace_repository_summary(root: String) -> Result<workspace::RepositorySummary, String> {
+    Git::open_exact(&root, None).await?.workspace_summary().await
+}
+
+#[tauri::command]
+async fn close_repository(root: String, state: State<'_, AppState>) -> Result<(), String> {
+    let mut current = state.0.lock().await;
+    if current.as_ref().is_none_or(|git| git.root_string() != root) {
+        return Err("当前仓库已改变".into());
+    }
+    *current = None;
+    Ok(())
 }
 
 #[tauri::command]
@@ -356,6 +371,18 @@ async fn local_history_capture(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     active(&*state.0.lock().await, &root)?.local_history_capture(&path, &reason).await
+}
+
+async fn capture_history_when_idle(state: &AppState, root: &str, path: &str) -> Result<bool, String> {
+    let Ok(current) = state.0.try_lock() else { return Ok(false); };
+    let Ok(git) = active(&current, root) else { return Ok(false); };
+    git.local_history_capture(path, "Git 工作区刷新").await?;
+    Ok(true)
+}
+
+#[tauri::command]
+async fn local_history_capture_background(root: String, path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    capture_history_when_idle(&state, &root, &path).await
 }
 
 #[tauri::command]
@@ -1049,6 +1076,8 @@ pub fn run() {
             fetch_review_branch,
             initial_repository,
             discover_workspace,
+            close_repository,
+            workspace_repository_summary,
             open_release_page,
             open_repository,
             repository_status,
@@ -1072,6 +1101,7 @@ pub fn run() {
             read_review_worktree,
             local_history_list,
             local_history_capture,
+            local_history_capture_background,
             local_history_read,
             local_history_preview_restore,
             local_history_restore,
