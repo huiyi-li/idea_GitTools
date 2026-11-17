@@ -94,6 +94,37 @@ async fn does_not_use_an_enclosing_repository_and_keeps_scanning_inside_it() {
 }
 
 #[tokio::test]
+async fn incomplete_nested_git_dir_is_not_mistaken_for_a_second_repository() {
+    let fixture = TempDir::new().unwrap();
+    repository(fixture.path()).await;
+    let nested = fixture.path().join("peripheral_examples");
+    fs::create_dir_all(nested.join(".git/objects")).unwrap();
+    fs::create_dir_all(nested.join(".git/refs/heads")).unwrap();
+    fs::write(nested.join(".git/ORIG_HEAD"), "0".repeat(40)).unwrap();
+    let inherited = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(&nested)
+        .output()
+        .unwrap();
+    assert!(inherited.status.success());
+    assert_eq!(
+        std::path::Path::new(std::str::from_utf8(&inherited.stdout).unwrap().trim())
+            .canonicalize()
+            .unwrap(),
+        fixture.path().canonicalize().unwrap()
+    );
+    let result = discover(fixture.path().to_str().unwrap(), 1).await.unwrap();
+    assert_eq!(names(&result), vec!["."]);
+    assert!(result.truncated);
+    assert!(result
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("peripheral_examples") && warning.contains("缺少 HEAD")));
+    assert!(!nested.join(".git/HEAD").exists());
+    assert!(!nested.join(".git/config").exists());
+}
+
+#[tokio::test]
 async fn discovers_linked_worktree_gitfile_with_external_git_metadata() {
     let fixture = TempDir::new().unwrap();
     let main = TempDir::new().unwrap();

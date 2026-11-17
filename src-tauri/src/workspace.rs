@@ -255,6 +255,14 @@ pub async fn discover(path: &str, max_depth: usize) -> Result<WorkspaceRepositor
         if !candidate {
             continue;
         }
+        let marker = path.join(".git");
+        if marker.is_dir() && !marker.join("HEAD").is_file() {
+            result.truncate(format!(
+                "未列出 {}：.git 元数据不完整（缺少 HEAD）。Git 可能把此目录归到父仓库。请恢复原有 Git 元数据后再单独管理；不要把它误当成第二个仓库提交。",
+                git_path(&path)
+            ));
+            continue;
+        }
         // Git::open alone searches ancestors: only call it for an explicit .git
         // marker, and still reject a root different from the directory scanned.
         match Git::open(&git_path(&path), None).await {
