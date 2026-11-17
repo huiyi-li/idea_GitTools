@@ -29,14 +29,10 @@
 
 # Release notes are maintained documentation. Plans and temporary reports stay local.
 /docs/*
-!/docs/RELEASE_0.4.0.md
-!/docs/RELEASE_0.4.1.md
-!/docs/RELEASE_0.4.3.md
+!/docs/RELEASE_*.md
 **/*.md
 !/README.md
-!/docs/RELEASE_0.4.0.md
-!/docs/RELEASE_0.4.1.md
-!/docs/RELEASE_0.4.3.md
+!/docs/RELEASE_*.md
 
 # Dependencies, generated code, packages and build output.
 node_modules/

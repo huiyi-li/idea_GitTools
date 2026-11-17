@@ -1,8 +1,16 @@
-import { readdir } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { releaseAssets, releaseCommands } from './release-plan.mjs';
 
 const tag = process.env.RELEASE_TAG;
-if (!tag) throw new Error('Missing RELEASE_TAG');
+const notesFile = process.env.RELEASE_NOTES_FILE;
+if (!tag || !notesFile) throw new Error('Missing RELEASE_TAG or RELEASE_NOTES_FILE');
+const version = JSON.parse(await readFile('package.json', 'utf8')).version;
+const notes = await readFile(notesFile, 'utf8');
+if (!notes.startsWith(`# IdeaGitTool ${version}\n`)) throw new Error('Release notes do not match app version');
+const assets = releaseAssets(version);
+for (const asset of assets) await access(asset);
+
 function gh(args) {
   const result = spawnSync('gh', args, { encoding: 'utf8', windowsHide: true });
   if (result.error) throw result.error;
@@ -10,13 +18,6 @@ function gh(args) {
   return result.stdout;
 }
 const existing = spawnSync('gh', ['release', 'view', tag, '--json', 'isDraft'], { encoding: 'utf8', windowsHide: true });
-if (existing.status === 0) {
-  if (!JSON.parse(existing.stdout).isDraft) throw new Error('该版本已发布，禁止覆盖已发布的更新文件');
-} else {
-  const notes = process.env.RELEASE_NOTES_FILE ? ['--notes-file', process.env.RELEASE_NOTES_FILE] : ['--generate-notes'];
-  gh(['release', 'create', tag, '--verify-tag', '--draft', '--title', `IdeaGitTool ${tag}`, ...notes,
-    ...(/-/.test(tag) ? ['--prerelease'] : [])]);
-}
-const files = (await readdir('release')).filter(name => /\.(exe|sig|zip|json)$/.test(name)).map(name => `release/${name}`);
-gh(['release', 'upload', tag, ...files, '--clobber']);
-console.log('签名安装包与 latest.json 已上传至草稿，发布草稿后客户端即可检测更新。');
+if (existing.error) throw existing.error;
+for (const command of releaseCommands({ tag, version, notesFile, existing, assets })) gh(command);
+console.log(`已验证并正式发布 ${tag} 的安装包、便携程序与更新清单。`);

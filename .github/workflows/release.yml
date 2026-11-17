@@ -24,22 +24,34 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.97.1
           components: clippy
-      - name: Validate release version
+      - name: Select versioned release notes
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "RELEASE_NOTES_FILE=docs/RELEASE_${version}.md" >> "$GITHUB_ENV"
+      - name: Validate release version and notes
         run: node scripts/check-release.mjs
+      - name: Validate release publishing plan
+        run: node --test scripts/release-plan.test.mjs
+      - name: Check updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo '::error::Configure TAURI_SIGNING_PRIVATE_KEY before publishing.'
+            exit 1
+          fi
       - run: npm ci
       - run: npm test
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: Generate release notes
-        run: gh api "repos/${{ github.repository }}/releases/generate-notes" -f "tag_name=${{ github.ref_name }}" --jq .body > release-notes.txt
-        env:
-          GH_TOKEN: ${{ github.token }}
       - name: Build signed installer and update manifest
         run: npm run package
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RELEASE_NOTES_FILE: release-notes.txt
       - name: Verify signed release and reject tampered installer
         run: cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_key_and_rejects_tampering -- --ignored
       - name: Upload release artifacts
@@ -48,9 +60,8 @@ jobs:
           name: IdeaGitTool-${{ github.ref_name }}-windows-x64
           path: release/*
           if-no-files-found: error
-      - name: Create release draft
+      - name: Publish verified release
         run: node scripts/publish-release.mjs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_NOTES_FILE: release-notes.txt

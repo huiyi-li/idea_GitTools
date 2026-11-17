@@ -244,7 +244,7 @@ Windows 更新沿用 NSIS 安装包和 passive 模式，安装到 Program Files 
 
 `npm run package` 优先读取 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`，本机未设置环境变量时读取上述文件，密码默认为空。可用 `IDEAGITTOOL_SIGNING_KEY_PATH` 指定其他本地密钥路径，旁边需有匹配的 `.pub` 文件。更换构建机器时恢复已有密钥。派生项目可用 `npx tauri signer generate --ci -p "" -w <本地私钥路径>` 创建自身密钥，并将公钥正文写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。
 
-打包产物包括 `IdeaGitTool-setup.exe`、对应 `.sig`、便携 ZIP、`latest.json` 和哈希清单。清单中的签名为 `.sig` 文件正文。`RELEASE_TAG` 支持与应用版本一致的 `0.4.2` 或 `v0.4.2` 形式，默认使用应用版本。可用 `RELEASE_NOTES_FILE` 指定 UTF-8 发布说明文件。
+打包产物包括 `IdeaGitTool-setup.exe`、对应 `.sig`、便携 ZIP、`latest.json` 和哈希清单。清单中的签名为 `.sig` 文件正文。`RELEASE_TAG` 支持与应用版本一致的 `0.4.4` 或 `v0.4.4` 形式，默认使用应用版本。可用 `RELEASE_NOTES_FILE` 指定 UTF-8 发布说明文件。
 
 打包后可验证安装包签名、公钥匹配、篡改拒绝和全部产物哈希。
 
@@ -256,9 +256,9 @@ cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_
 
 在仓库 Settings → Secrets and variables → Actions 添加 `TAURI_SIGNING_PRIVATE_KEY`，值为已有私钥文件正文。私钥有密码时同时添加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥和密码通过 GitHub Actions secrets 注入构建，保留本地备份。
 
-`.github/workflows/release.yml` 在推送版本 tag 后验证三处版本一致性，执行测试、Clippy、签名打包和产物验签，然后创建带完整资源的 Release 草稿。支持重试上传草稿，已发布版本会拒绝覆盖。核对草稿后点击 Publish release，最新正式版本即可被客户端发现。仓库 Actions 需允许工作流写入仓库内容。
+`.github/workflows/release.yml` 在推送版本 tag 后核对五处版本及对应功能说明，执行测试、Clippy、签名打包和产物验签。Action 先创建草稿并上传所需资源；上传成功后自动公开发布并标记为 Latest。上传中断时保留草稿供重试，已发布的版本禁止覆盖。正式发布后，客户端即可读取 `latest.json`。仓库 Actions 需允许工作流写入仓库内容，并配置更新签名私钥。
 
-准备发布时同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的应用版本，提交后创建并推送对应 tag。首次使用应用内更新需先安装包含 updater 的构建。当前版本的更新内容见 [0.4.3 发布说明](docs/RELEASE_0.4.3.md)。
+准备发布时同步更新 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的应用版本，编写 `docs/RELEASE_<版本>.md`，提交后创建并推送对应 tag。功能说明沿用发布页标题与分节写法，只列新增功能。首次使用应用内更新需先安装包含 updater 的构建。当前版本的更新内容见 [0.4.4 发布说明](docs/RELEASE_0.4.4.md)。
 
 安装向导支持选择“当前用户”或“所有用户”。安装到 `C:\Program Files\IdeaGitTool` 时选择“所有用户”，并允许 Windows 管理员授权。双模式安装包启动时可能弹出 UAC 提示，选择“当前用户”时也可能需要授权。
 
