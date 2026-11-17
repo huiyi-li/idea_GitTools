@@ -1,3 +1,7 @@
+export function releaseNotesMatchVersion(notes, version) {
+  return notes.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] === `# IdeaGitTool ${version}`;
+}
+
 export function releaseAssets(version) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid release version');
   return [

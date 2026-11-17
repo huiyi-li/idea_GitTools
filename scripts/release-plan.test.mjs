@@ -1,11 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { releaseAssets, releaseCommands } from './release-plan.mjs';
+import { releaseAssets, releaseCommands, releaseNotesMatchVersion } from './release-plan.mjs';
 
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const notesFile = `docs/RELEASE_${version}.md`;
 const assets = releaseAssets(version);
+
+test('release note headers accept LF, CRLF and UTF-8 BOM but reject another version', () => {
+  assert.equal(releaseNotesMatchVersion(`# IdeaGitTool ${version}\n\n新增功能`, version), true);
+  assert.equal(releaseNotesMatchVersion(`# IdeaGitTool ${version}\r\n\r\n新增功能`, version), true);
+  assert.equal(releaseNotesMatchVersion(`\uFEFF# IdeaGitTool ${version}\r\n新增功能`, version), true);
+  assert.equal(releaseNotesMatchVersion('# IdeaGitTool 0.4.3\r\n', version), false);
+  assert.equal(releaseNotesMatchVersion(`# IdeaGitTool ${version}-wrong\r\n`, version), false);
+});
 
 test('publishes only versioned executable and signed updater assets', () => {
   assert.deepEqual(assets, [
@@ -42,7 +50,7 @@ test('a failed upload leaves a draft that can be retried without replacing publi
 
 test('versioned notes use the existing release layout and list features only', () => {
   const notes = readFileSync(notesFile, 'utf8');
-  assert.ok(notes.startsWith(`# IdeaGitTool ${version}\n`));
+  assert.equal(releaseNotesMatchVersion(notes, version), true);
   assert.match(notes, /^## 多仓库工作区$/m);
   assert.match(notes, /^## 提交与本地更改$/m);
   assert.match(notes, /^## 日志与提交图$/m);

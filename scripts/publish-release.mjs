@@ -1,13 +1,13 @@
 import { access, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { releaseAssets, releaseCommands } from './release-plan.mjs';
+import { releaseAssets, releaseCommands, releaseNotesMatchVersion } from './release-plan.mjs';
 
 const tag = process.env.RELEASE_TAG;
 const notesFile = process.env.RELEASE_NOTES_FILE;
 if (!tag || !notesFile) throw new Error('Missing RELEASE_TAG or RELEASE_NOTES_FILE');
 const version = JSON.parse(await readFile('package.json', 'utf8')).version;
 const notes = await readFile(notesFile, 'utf8');
-if (!notes.startsWith(`# IdeaGitTool ${version}\n`)) throw new Error('Release notes do not match app version');
+if (!releaseNotesMatchVersion(notes, version)) throw new Error('Release notes do not match app version');
 const assets = releaseAssets(version);
 for (const asset of assets) await access(asset);
 
