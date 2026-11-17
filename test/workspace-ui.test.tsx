@@ -328,8 +328,11 @@ test('Submodule view shows status and updates the selected path', async () => {
     await waitFor(() => document.querySelector('.submodule-row'));
     const checkbox = document.querySelector<HTMLInputElement>('.submodule-row input[type="checkbox"]')!;
     checkbox.click();
-    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>('button')].some(item => item.textContent?.trim() === '更新选中 (1)'));
-    [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === '更新选中 (1)')!.click();
+    await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>('button')].some(item => item.textContent?.trim() === '更新选中 (1)…'));
+    button('更新选中 (1)…').click();
+    await waitFor(() => document.querySelector('[aria-label="确认更新子模块"]'));
+    assert.ok(!calls.some(call => call.command === 'update_submodules'));
+    button('确认更新').click();
     await waitFor(() => calls.some(call => call.command === 'update_submodules'));
     assert.deepEqual(calls.find(call => call.command === 'update_submodules')!.args.paths, ['libs/core']);
   } finally { render(null, root); }
@@ -345,8 +348,8 @@ test('Git Bisect shows the active commit and sends a result action', async () =>
   };
   try {
     render(<BisectDialog root="C:/fixture" onClose={() => {}} onChanged={async () => {}} />, root);
-    await waitFor(() => root.textContent?.includes('Current:'));
-    button('Good').click();
+    await waitFor(() => root.textContent?.includes('当前提交：'));
+    button('正常 · Good').click();
     await waitFor(() => calls.some(call => call.command === 'bisect_step'));
     assert.equal(calls.find(call => call.command === 'bisect_step')!.args.action, 'good');
   } finally { render(null, root); }
@@ -802,6 +805,31 @@ test('late reads from the old repository cannot overwrite the new repository or 
     assert.ok(root.querySelector('.repository-picker')?.textContent?.includes('next'));
     assert.ok(root.querySelector('.commit-row')?.textContent?.includes('Next repository commit'));
     assert.ok(!root.querySelector('[role="alert"]')?.textContent?.includes('Old repository read failed'));
+  } finally { render(null, root); delete (globalThis as any).testDialog; }
+});
+
+test('stash and changelist modals block workbench shortcuts and close with Escape', async () => {
+  const calls = fixture(false, { changes: [{ path: 'src/example.ts', oldPath: null, index: 'M', workTree: ' ', conflict: false }] });
+  let pickers = 0;
+  (globalThis as any).testDialog = async () => { pickers++; return 'C:/other'; };
+  try {
+    await openChanges();
+    const message = root.querySelector<HTMLTextAreaElement>('#commit-message')!;
+    message.value = 'must not commit behind a modal';
+    message.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    for (const [trigger, title] of [['保存到 Stash', '保存 Stash'], ['新建 Changelist', '新建 Changelist']]) {
+      button(trigger).click();
+      await waitFor(() => root.querySelector(`[role="dialog"][aria-label="${title}"]`));
+      const panel = root.querySelector<HTMLElement>(`[role="dialog"][aria-label="${title}"]`)!;
+      const before = calls.filter(item => ['repository_status', 'create_commit', 'open_repository'].includes(item.command)).length;
+      for (const event of [new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true }), new KeyboardEvent('keydown', { key: 'F5', bubbles: true }), new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })]) panel.dispatchEvent(event);
+      await new Promise(resolve => setTimeout(resolve, 40));
+      assert.equal(pickers, 0);
+      assert.equal(calls.filter(item => ['repository_status', 'create_commit', 'open_repository'].includes(item.command)).length, before);
+      panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await waitFor(() => !root.querySelector(`[role="dialog"][aria-label="${title}"]`));
+    }
   } finally { render(null, root); delete (globalThis as any).testDialog; }
 });
 

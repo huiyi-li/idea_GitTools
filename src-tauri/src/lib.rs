@@ -345,13 +345,24 @@ async fn local_history_read(
 }
 
 #[tauri::command]
-async fn local_history_restore(
+async fn local_history_preview_restore(
     root: String,
     path: String,
     id: String,
     state: State<'_, AppState>,
+) -> Result<git::local_history::RestorePreview, String> {
+    active(&*state.0.lock().await, &root)?.local_history_preview_restore(&id, &path).await
+}
+
+#[tauri::command]
+async fn local_history_restore(
+    root: String,
+    path: String,
+    id: String,
+    expected_stamp: String,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    active(&*state.0.lock().await, &root)?.local_history_restore(&id, &path).await
+    active(&*state.0.lock().await, &root)?.local_history_restore(&id, &path, &expected_stamp).await
 }
 
 #[tauri::command]
@@ -1037,6 +1048,7 @@ pub fn run() {
             local_history_list,
             local_history_capture,
             local_history_read,
+            local_history_preview_restore,
             local_history_restore,
             stage_paths,
             preview_discard,

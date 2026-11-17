@@ -740,6 +740,7 @@ export function App() {
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return;
       if (showUpdates) return;
       if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository) return;
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
@@ -1426,7 +1427,7 @@ export function App() {
       {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}-${interactiveAction?.hash ?? ''}-${interactiveAction?.action ?? ''}`} root={root} initialBase={interactiveBase} initialAction={interactiveAction} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
-      {showMultiRepository && <MultiRepositoryDialog currentRoot={root} onClose={() => setShowMultiRepository(false)} />}
+      {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} />}
       {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={() => refresh(root, true)} />}
 
       {mergePath !== null && (
@@ -1618,9 +1619,8 @@ export function App() {
       )}
 
       {(newChangeListDialog || changeListTarget) && (
-        <div class="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) { setNewChangeListDialog(false); setChangeListTarget(null); } }}>
+        <Modal title={changeListTarget ? '移动到 Changelist' : '新建 Changelist'} busy={!!busy} onClose={() => { setNewChangeListDialog(false); setChangeListTarget(null); }}>
           <form
-            class="modal"
             onSubmit={(event) => {
               event.preventDefault();
               if (changeListTarget) createAndAssignChangeList(changeListTarget);
@@ -1635,9 +1635,6 @@ export function App() {
                 }
               }
             }}
-            role="dialog"
-            aria-modal="true"
-            aria-label={changeListTarget ? '移动到 Changelist' : '新建 Changelist'}
           >
             <h2>{changeListTarget ? '移动到 Changelist' : '新建 Changelist'}</h2>
             {changeListTarget && (
@@ -1659,18 +1656,12 @@ export function App() {
               <button type="submit" class="primary" disabled={!!busy || !newChangeListName.trim()}>{changeListTarget ? '新建并移动' : '创建'}</button>
             </div>
           </form>
-        </div>
+        </Modal>
       )}
 
       {dialog && (
-        <div
-          class="modal-backdrop"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !busy) setDialog(null);
-          }}
-        >
+        <Modal title={dialog.kind === 'branch' ? '新建分支' : dialog.kind === 'shelf' ? '保存 Shelf' : '保存 Stash'} busy={!!busy} onClose={() => setDialog(null)}>
           <form
-            class="modal"
             onSubmit={(event) => {
               event.preventDefault();
               void mutate(
@@ -1681,9 +1672,6 @@ export function App() {
                 if (success) setDialog(null);
               });
             }}
-            role="dialog"
-            aria-modal="true"
-            aria-label={dialog.kind === 'branch' ? '新建分支' : dialog.kind === 'shelf' ? '保存 Shelf' : '保存 Stash'}
           >
             <h2>{dialog.kind === 'branch' ? '新建并切换分支' : dialog.kind === 'shelf' ? '保存到 Shelf' : '保存到 Stash'}</h2>
             <label>
@@ -1706,7 +1694,7 @@ export function App() {
               </button>
             </div>
           </form>
-        </div>
+        </Modal>
       )}
     </div>
   );

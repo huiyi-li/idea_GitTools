@@ -86,12 +86,13 @@ input[type='checkbox'] {
   padding: 8px 0;
 }
 
-.diagnostics-grid > strong {
+.diagnostics-grid > dt {
   color: var(--fg-info);
   font-weight: 500;
 }
 
-.diagnostics-grid > span {
+.diagnostics-grid > dd {
+  margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -104,14 +105,20 @@ input[type='checkbox'] {
   overflow: auto;
 }
 
-.submodule-row {
+.modal label.submodule-row {
   display: grid;
-  grid-template-columns: max-content max-content minmax(120px, 1fr) minmax(0, 1.5fr);
-  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr) max-content;
+  gap: 12px;
   align-items: center;
-  padding: 6px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
   border-radius: 4px;
+  cursor: pointer;
 }
+.submodule-entry { min-width: 0; display: grid; gap: 5px; }
+.submodule-entry > span, .submodule-entry > small { overflow-wrap: anywhere; }
+.submodule-row input[type='checkbox'] { width: auto; margin: 0; }
+.submodule-row:has(input:checked) { background: var(--bg-selection); border-color: var(--focus); }
 
 .submodule-row:hover {
   background: var(--bg-action-hover);
@@ -1205,6 +1212,8 @@ input[type='checkbox'] {
 .modal {
   width: 430px;
   max-width: 90vw;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   background: var(--bg-popup);
   border: 1px solid var(--border-popup);
   border-radius: 6px;
@@ -1230,6 +1239,7 @@ input[type='checkbox'] {
 }
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 22px;
@@ -1322,3 +1332,29 @@ input[type='checkbox'] {
 }
 .transport-dialog input[type="checkbox"], .workflow-dialog input[type="checkbox"] { width: auto; }
 .transport-form select { color: var(--fg); background: var(--bg-input); border: 1px solid var(--border-control); border-radius: 4px; padding: 5px 8px; }
+
+.modal.utility-dialog { width: 760px; max-width: calc(100vw - 32px); }
+.utility-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.modal .utility-heading h2 { margin: 0 0 6px; font-size: 16px; }
+.modal .utility-heading p { margin: 0; }
+.utility-heading > .tool-button { flex: 0 0 auto; }
+.utility-root { padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-editor); }
+.utility-state { padding: 12px; border: 1px solid var(--border-subtle); border-radius: 4px; background: var(--bg-editor); }
+.utility-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
+.utility-selection > span { margin-right: auto; color: var(--fg-info); }
+.utility-actions { border-top: 1px solid var(--border-subtle); padding-top: 14px; margin-top: 18px; align-items: center; }
+.multi-repository-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; margin-bottom: 16px; }
+.multi-repository-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--border-subtle); border-radius: 4px; }
+.multi-repository-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.utility-details { margin-top: 16px; }
+.utility-details summary { cursor: pointer; padding: 6px 0; }
+.utility-paths { padding-left: 24px; overflow-wrap: anywhere; max-height: 120px; overflow-y: auto; }
+.bisect-results { display: flex; flex-wrap: wrap; gap: 8px; }
+.bisect-results > button { border-color: var(--border-control); padding: 7px 14px; }
+.bisect-dialog .transport-form input { width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .modal.utility-dialog { padding: 14px; }
+  .diagnostics-grid { grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 8px; }
+  .modal label.submodule-row { gap: 8px; padding: 8px; }
+  .utility-actions .spacer { display: none; }
+}

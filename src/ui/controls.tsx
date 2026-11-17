@@ -220,11 +220,20 @@ export function Modal({
   children: ComponentChildren;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>(
+    'button, input, textarea, select, a[href], summary, [tabindex]',
+  ) ?? []).filter(element => {
+    if (element.tabIndex < 0 || element.matches(':disabled, input[type="hidden"]') || element.closest('[hidden], [inert]')) return false;
+    for (let node: HTMLElement | null = element; node && node !== panel.current; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (node.parentElement?.tagName === 'DETAILS' && !node.parentElement.hasAttribute('open') && node.tagName !== 'SUMMARY') return false;
+    }
+    return true;
+  });
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const frame = requestAnimationFrame(() =>
-      panel.current?.querySelector<HTMLElement>('select, input, textarea, button:not(:disabled)')?.focus(),
-    );
+    const frame = requestAnimationFrame(() => (focusable()[0] ?? panel.current)?.focus());
     return () => {
       cancelAnimationFrame(frame);
       if (previous?.isConnected) previous.focus();
@@ -243,6 +252,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault();
@@ -250,14 +260,15 @@ export function Modal({
             if (!busy) onClose();
           }
           if (event.key === 'Tab') {
-            const controls = Array.from(
-              panel.current!.querySelectorAll<HTMLElement>(
-                'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
-              ),
-            );
-            const first = controls[0],
-              last = controls[controls.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
+            const controls = focusable();
+            const first = controls[0], last = controls[controls.length - 1];
+            if (!controls.length) {
+              event.preventDefault();
+              panel.current?.focus();
+            } else if (!controls.includes(document.activeElement as HTMLElement)) {
+              event.preventDefault();
+              (event.shiftKey ? last : first).focus();
+            } else if (event.shiftKey && document.activeElement === first) {
               event.preventDefault();
               last?.focus();
             } else if (!event.shiftKey && document.activeElement === last) {
