@@ -254,7 +254,7 @@ cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_
 
 ### GitHub 自动构建与发布
 
-在仓库 Settings → Secrets and variables → Actions 添加 `TAURI_SIGNING_PRIVATE_KEY`，值为已有私钥文件正文。私钥有密码时同时添加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥和密码通过 GitHub Actions secrets 注入构建，保留本地备份。
+在仓库 Settings → Secrets and variables → Actions 添加 `TAURI_SIGNING_PRIVATE_KEY`，或使用已有的 `IDEA_KEY`，值为同一份更新签名私钥文件正文。两者都存在时优先使用 `TAURI_SIGNING_PRIVATE_KEY`。私钥有密码时同时添加 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥和密码通过 GitHub Actions secrets 注入构建，保留本地备份。不要将私钥作为 Release 附件或写入仓库。
 
 `.github/workflows/release.yml` 在推送版本 tag 后核对五处版本及对应功能说明，执行测试、Clippy、签名打包和产物验签。Action 先创建草稿并上传所需资源；上传成功后自动公开发布并标记为 Latest。上传中断时保留草稿供重试，已发布的版本禁止覆盖。正式发布后，客户端即可读取 `latest.json`。仓库 Actions 需允许工作流写入仓库内容，并配置更新签名私钥。
 

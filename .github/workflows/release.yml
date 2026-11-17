@@ -38,10 +38,10 @@ jobs:
       - name: Check updater signing key
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.IDEA_KEY }}
         run: |
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo '::error::Configure TAURI_SIGNING_PRIVATE_KEY before publishing.'
+            echo '::error::Configure TAURI_SIGNING_PRIVATE_KEY or IDEA_KEY with the existing updater private key before publishing.'
             exit 1
           fi
       - run: npm ci
@@ -50,7 +50,7 @@ jobs:
       - name: Build signed installer and update manifest
         run: npm run package
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.IDEA_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify signed release and reject tampered installer
         run: cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_key_and_rejects_tampering -- --ignored
