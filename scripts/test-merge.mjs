@@ -9,6 +9,7 @@ const directory = await mkdtemp(join(tmpdir(), 'ideagittool-merge-test-'));
 try {
   const tests = [
     'merge.test',
+    'background-history.test',
     'merge-ui.test',
     'workspace-ui.test',
     'workspace-repositories.test',

@@ -14,7 +14,7 @@ globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.getComputedStyle = window.getComputedStyle.bind(window) as typeof getComputedStyle;
 const { App } = await import('../src/App');
 const host = document.body.appendChild(document.createElement('div'));
-afterEach(() => { render(null, host); localStorage.clear(); });
+afterEach(() => { render(null, host); localStorage.clear(); delete (globalThis as any).testDialog; });
 after(() => window.happyDOM.close());
 const a = 'C:/workspace/apps/api';
 const b = 'C:/workspace/libs/api';
@@ -48,7 +48,7 @@ function fixture() {
     localStorage.setItem(`commit.messages.${root}`, JSON.stringify([`${name} previous message`]));
   }
   let active = '';
-  const options: { rejectB?: boolean; beforeCommit?: Promise<void>; oldDiff?: Promise<any>; truncated?: boolean } = {};
+  const options: { rejectB?: boolean; beforeCommit?: Promise<void>; oldDiff?: Promise<any>; truncated?: boolean; missingA?: boolean; history?: Promise<boolean> } = {};
   (globalThis as any).testBackend = async (command: string, args: any) => {
     calls.push({ command, args: structuredClone(args) });
     if (command === 'initial_repository') return null;
@@ -56,7 +56,7 @@ function fixture() {
       root: 'C:/workspace', repositories: [
         { root: a, name: 'api', relativePath: 'apps/api' },
         { root: b, name: 'api', relativePath: 'libs/api' },
-      ], truncated: !!options.truncated, warnings: options.truncated ? ['Depth limit reached'] : [],
+      ].filter(repository => !options.missingA || repository.root !== a), truncated: !!options.truncated, warnings: options.truncated ? ['Depth limit reached'] : [],
     };
     if (command === 'open_repository') {
       if (options.rejectB && args.path === b) throw Error('selected repository no longer exists');
@@ -64,6 +64,12 @@ function fixture() {
       active = args.path;
       return structuredClone(states[active]);
     }
+    if (command === 'workspace_repository_summary') {
+      assert.ok(states[args.root]);
+      return { root: args.root, branch: states[args.root].repository.branch, changedFiles: 1, stagedFiles: 1, conflicts: 0 };
+    }
+    if (command === 'close_repository') { assert.equal(args.root, active); active = ''; return; }
+    if (command === 'local_history_capture_background') return options.history ?? (args.root === active);
     assert.equal(args.root, active, `${command} must address the selected repository`);
     if (command === 'repository_status') return structuredClone(states[active]);
     if (command === 'read_log') return { commits: [], hasMore: false };
@@ -101,7 +107,7 @@ async function scanWorkspace() {
 async function openFirst() {
   await scanWorkspace();
   button('管理仓库 apps/api').click();
-  await waitFor(() => host.querySelector('[aria-label="选择工作区仓库"]'));
+  await waitFor(() => host.querySelector('.repository-tablist'));
 }
 async function changes() {
   const tab = [...host.querySelectorAll<HTMLButtonElement>('.workspace-tabs button')].find(element => element.textContent?.startsWith('提交'))!;
@@ -111,13 +117,80 @@ function setMessage(value: string) {
   const element = host.querySelector<HTMLTextAreaElement>('#commit-message')!;
   element.value = value; element.dispatchEvent(new window.Event('input', { bubbles: true }));
 }
-function selectRepository(root: string) {
-  const select = host.querySelector<HTMLSelectElement>('[aria-label="选择工作区仓库"]')!;
-  select.value = root; select.dispatchEvent(new window.Event('change', { bubbles: true }));
+function repositoryTab(root: string) {
+  const tab = host.querySelector<HTMLButtonElement>(`[role="tab"][data-repository-root="${root}"]`);
+  assert.ok(tab, `tab for ${root}`); return tab;
 }
+function selectRepository(root: string) { repositoryTab(root).click(); }
 function selectFile() { host.querySelector<HTMLButtonElement>('.changes-panel .file-select')!.click(); }
 
- test('workspace scan does not open or merge repositories before an explicit choice', async () => {
+test('opening a folder creates visible repository tabs without a scan dialog', async () => {
+  const { calls } = fixture();
+  (globalThis as any).testDialog = async () => 'C:/workspace';
+  button('打开包含多个仓库的文件夹').click();
+  await waitFor(() => host.querySelectorAll('[role="tab"]').length === 2);
+  assert.equal(host.querySelector('[aria-label="工作区仓库"]'), null);
+  assert.equal(repositoryTab(a).getAttribute('aria-selected'), 'true');
+  assert.ok(host.textContent?.includes('仓库 (2)'));
+  assert.deepEqual(calls.filter(call => call.command === 'open_repository').map(call => call.args), [{ path: a, exactRoot: true }]);
+});
+
+test('an unavailable remembered repository is not silently replaced by another tab', async () => {
+  const { calls, options } = fixture();
+  options.missingA = true;
+  localStorage.setItem('workspace.lastFolder', JSON.stringify('C:/workspace'));
+  localStorage.setItem('workspace.active.C:/workspace', JSON.stringify(a));
+  await waitFor(() => host.querySelectorAll('[role="tab"]').length === 1);
+  assert.ok(host.textContent?.includes('上次使用的仓库不可用'));
+  assert.equal(repositoryTab(b).getAttribute('aria-selected'), 'false');
+  assert.ok(!calls.some(call => call.command === 'open_repository'));
+  selectRepository(b);
+  await waitFor(() => repositoryTab(b).getAttribute('aria-selected') === 'true');
+  assert.equal(calls.find(call => call.command === 'open_repository')!.args.path, b);
+});
+
+test('tabs show unique change counts, use manual keyboard activation and offer searchable overflow', async () => {
+  const { calls } = fixture();
+  await openFirst();
+  await waitFor(() => repositoryTab(b).textContent?.includes('B-main'));
+  assert.ok(repositoryTab(a).textContent?.includes('1 个变更'));
+  assert.ok(!repositoryTab(a).textContent?.includes('2 个变更'));
+  assert.ok(repositoryTab(a).title.includes(a));
+  repositoryTab(a).focus();
+  const count = calls.filter(call => call.command === 'open_repository').length;
+  repositoryTab(a).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, repositoryTab(b));
+  assert.equal(repositoryTab(a).getAttribute('aria-selected'), 'true');
+  assert.equal(calls.filter(call => call.command === 'open_repository').length, count);
+  repositoryTab(b).click();
+  await waitFor(() => repositoryTab(b).getAttribute('aria-selected') === 'true');
+  button('全部仓库 (2)').click();
+  await waitFor(() => document.querySelector('[aria-label="搜索全部仓库"]'));
+  const search = document.querySelector<HTMLInputElement>('[aria-label="搜索全部仓库"]')!;
+  search.value = 'apps/api'; search.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await waitFor(() => document.querySelectorAll('.repository-search-item').length === 1);
+  (document.querySelector('.repository-search-item') as HTMLButtonElement).click();
+  await waitFor(() => repositoryTab(a).getAttribute('aria-selected') === 'true');
+});
+
+test('staging one of many files does not flood history requests or block the next stage', async () => {
+  const { calls, states, options } = fixture();
+  const history = deferred<boolean>(); options.history = history.promise;
+  states[a].changes = Array.from({ length: 600 }, (_, index) => ({ path: `file-${index}.txt`, oldPath: null, index: ' ', workTree: 'M', conflict: false }));
+  try {
+    await openFirst(); await changes();
+    button('暂存 file-0.txt').click();
+    await waitFor(() => calls.some(call => call.command === 'local_history_capture_background'));
+    assert.equal(calls.filter(call => call.command === 'local_history_capture_background').length, 1);
+    assert.ok(!calls.some(call => call.command === 'local_history_capture'));
+    assert.equal(button('暂存 file-1.txt').disabled, false);
+    button('暂存 file-1.txt').click();
+    await waitFor(() => calls.filter(call => call.command === 'stage_paths').length === 2);
+    assert.equal(calls.filter(call => call.command === 'local_history_capture_background').length, 1);
+  } finally { history.resolve(true); }
+});
+
+test('workspace management scan does not open or merge repositories before an explicit choice', async () => {
   const { calls, options } = fixture();
   options.truncated = true;
   await scanWorkspace();
@@ -126,7 +199,7 @@ function selectFile() { host.querySelector<HTMLButtonElement>('.changes-panel .f
   assert.ok(host.textContent?.includes('扫描未覆盖全部目录'));
   assert.ok(!calls.some(call => call.command === 'open_repository'));
   button('管理仓库 libs/api').click();
-  await waitFor(() => host.querySelector('[aria-label="选择工作区仓库"]'));
+  await waitFor(() => host.querySelector('.repository-tablist'));
   const opened = calls.find(call => call.command === 'open_repository')!;
   assert.deepEqual(opened.args, { path: b, exactRoot: true });
   assert.ok(!calls.some(call => ['create_commit', 'stage_paths', 'multi_repository_sync'].includes(call.command)));
@@ -162,8 +235,8 @@ test('same-name repositories keep commit drafts, staged state and diff selection
   assert.equal(localStorage.getItem(`commit.draft.${a}`), '"A draft"');
   assert.equal(localStorage.getItem(`commit.draft.${b}`), '""');
   render(null, host); render(<App />, host);
-  await waitFor(() => host.querySelector<HTMLButtonElement>(`.recent button[title="${a}"]`));
-  host.querySelector<HTMLButtonElement>(`.recent button[title="${a}"]`)!.click();
+  await waitFor(() => host.querySelector('.repository-tablist'));
+  assert.equal(repositoryTab(a).getAttribute('aria-selected'), 'true');
   await waitFor(() => host.querySelector('.workspace-tabs')); await changes();
   assert.equal(host.querySelector<HTMLTextAreaElement>('#commit-message')!.value, 'A draft');
 });
@@ -175,18 +248,18 @@ test('commit locks repository switching and a failed switch preserves the origin
   options.rejectB = true;
   selectRepository(b);
   await waitFor(() => host.textContent?.includes('selected repository no longer exists'));
-  assert.equal(host.querySelector<HTMLSelectElement>('[aria-label="选择工作区仓库"]')!.value, a);
+  assert.equal(repositoryTab(a).getAttribute('aria-selected'), 'true');
   assert.equal(host.querySelector<HTMLTextAreaElement>('#commit-message')!.value, 'A pending');
   const pending = deferred<void>(); options.beforeCommit = pending.promise;
   button('提交暂存内容').click();
   await waitFor(() => calls.some(call => call.command === 'create_commit'));
-  assert.equal(host.querySelector<HTMLSelectElement>('[aria-label="选择工作区仓库"]')!.disabled, true);
+  assert.equal(repositoryTab(b).getAttribute('aria-disabled'), 'true');
   const before = calls.filter(call => call.command === 'open_repository').length;
   selectRepository(b);
   await tick();
   assert.equal(calls.filter(call => call.command === 'open_repository').length, before);
   pending.resolve();
-  await waitFor(() => !host.querySelector<HTMLSelectElement>('[aria-label="选择工作区仓库"]')!.disabled);
+  await waitFor(() => repositoryTab(b).getAttribute('aria-disabled') === 'false');
   assert.equal(calls.find(call => call.command === 'create_commit')!.args.root, a);
 });
 

@@ -149,6 +149,8 @@ function fixture(
     switch (command) {
       case 'initial_repository':
         return status.repository.root;
+      case 'discover_workspace':
+        return { root: args.path, repositories: [{ root: args.path, name: args.path.split('/').at(-1), relativePath: '.' }], truncated: false, warnings: [] };
       case 'open_repository':
       case 'repository_status':
         return structuredClone(status);

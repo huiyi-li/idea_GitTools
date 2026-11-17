@@ -438,6 +438,9 @@ input[type='checkbox'] {
 .panel-heading button {
   font-size: 12px;
 }
+.changes-panel > .panel-heading { height: auto; flex-wrap: wrap; padding-top: 5px; padding-bottom: 5px; }
+.changes-panel > .panel-heading > span:first-child { flex-shrink: 0; white-space: nowrap; }
+.changes-panel > .panel-heading > label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .branches-panel {
   display: flex;
   flex: 1;

@@ -21,6 +21,8 @@ import {
 } from './api';
 import { changeListPath, readChangeLists, writeChangeLists, type ChangeListGroup } from './changelists';
 import { DiffView } from './DiffView';
+import { BackgroundHistoryCapture } from './ui/history-capture';
+import { useWorkspaceSummaries } from './ui/workspace-summaries';
 import { CloneDialog } from './TransportDialog';
 import { RemoteDialog, TransferDialog } from './RemoteDialog';
 import { RepositoryManager } from './RepositoryManager';
@@ -234,6 +236,7 @@ export function App() {
   const [showWorkspace, setShowWorkspace] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceRepositories | null>(null);
   const sessions = useRef(new Map<string, RepositorySession>());
+  const workspaceSummaries = useWorkspaceSummaries(workspace, status);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
@@ -242,6 +245,7 @@ export function App() {
   const gate = useRef(false);
   const updateInstallation = useRef(false);
   const pendingRefresh = useRef(false);
+  const historyCapture = useRef<BackgroundHistoryCapture>();
   const activeRoot = useRef('');
   const startupOpen = useRef(true);
   const root = status?.repository.root ?? '';
@@ -255,6 +259,16 @@ export function App() {
   function setMessage(value: string | ((previous: string) => string)) {
     if (root === activeRoot.current) setRepositoryMessage(root, typeof value === 'function' ? value(message) : value);
   }
+
+  useEffect(() => {
+    const scheduler = new BackgroundHistoryCapture(
+      (root, path) => call<boolean>('local_history_capture_background', { root, path }),
+      () => !gate.current,
+    );
+    historyCapture.current = scheduler;
+    scheduler.setRoot(activeRoot.current);
+    return () => scheduler.dispose();
+  }, []);
 
   useEffect(() => {
     document.body.className = theme === 'light' ? 'ij-light' : 'ij-dark';
@@ -340,6 +354,11 @@ export function App() {
       // Keep the operation lock while the native dialog restores window focus.
       const selectedPath = path ?? await open({ directory: true, multiple: false, title: '选择 Git 仓库' });
       if (typeof selectedPath !== 'string') return;
+      await loadRepository(selectedPath, exactRoot);
+    });
+  }
+
+  async function loadRepository(selectedPath: string, exactRoot = false) {
       if (root && root === activeRoot.current) {
         sessions.current.set(root, { view, target, selected, offset, search, searchInput, branch, filters: logFilters, activeChangeList });
       }
@@ -348,6 +367,7 @@ export function App() {
       const lists = readChangeLists(next.repository.root);
       const savedMessages = readSaved<unknown>(`commit.messages.${next.repository.root}`, []);
       activeRoot.current = next.repository.root;
+      historyCapture.current?.setRoot(next.repository.root);
       setStatus(next);
       setPage(EMPTY_PAGE);
       setSelected(restored?.selected ?? null);
@@ -411,11 +431,53 @@ export function App() {
       setRecent(paths);
       try { save('recent', paths); }
       catch { setNotice('仓库已打开，但无法保存最近仓库列表。'); }
+      if (workspace?.repositories.some(repository => repository.root === next.repository.root)) {
+        try { save(`workspace.active.${workspace.root}`, next.repository.root); } catch { /* The current session remains usable. */ }
+      } else {
+        setWorkspace({ root: next.repository.root, repositories: [{ root: next.repository.root, name: next.repository.name, relativePath: '.' }], truncated: false, warnings: [] });
+      }
+  }
+
+  function rememberWorkspace(next: WorkspaceRepositories, selected: string, depth: number) {
+    setWorkspace(next);
+    try {
+      save('workspace.lastFolder', next.root);
+      save('workspace.scanDepth', depth);
+      if (selected) save(`workspace.active.${next.root}`, selected);
+    } catch { setNotice('工作区已打开，本次无法记住路径或选中仓库。'); }
+  }
+
+  async function openFolder(path?: string, restoring = false) {
+    if (!restoring) startupOpen.current = false;
+    return perform('打开工作区', async () => {
+      const folder = path ?? await open({ directory: true, multiple: false, title: '打开包含 Git 仓库的文件夹' });
+      if (typeof folder !== 'string') return;
+      const savedDepth = readSaved<unknown>('workspace.scanDepth', 4);
+      const depth = typeof savedDepth === 'number' && Number.isInteger(savedDepth) && savedDepth >= 0 && savedDepth <= 8 ? savedDepth : 4;
+      const next = await call<WorkspaceRepositories>('discover_workspace', { path: folder, maxDepth: depth });
+      const remembered = readSaved<unknown>(`workspace.active.${next.root}`, '');
+      const savedRoot = typeof remembered === 'string' ? remembered : '';
+      const chosen = savedRoot ? next.repositories.find(repository => repository.root === savedRoot) : next.repositories[0];
+      if (chosen) {
+        await loadRepository(chosen.root, true);
+        rememberWorkspace(next, chosen.root, depth);
+      } else {
+        if (root && root === activeRoot.current) {
+          sessions.current.set(root, { view, target, selected, offset, search, searchInput, branch, filters: logFilters, activeChangeList });
+          await call('close_repository', { root });
+        }
+        activeRoot.current = '';
+        historyCapture.current?.setRoot('');
+        setStatus(null); setPage(EMPTY_PAGE); setSelected(null); setDetails(null); setTarget(null);
+        setMessageHistory([]); setChangeLists([]); setActiveChangeList('');
+        rememberWorkspace(next, '', depth);
+        setNotice(savedRoot ? '上次使用的仓库不可用，请明确选择另一个标签；不会自动切到其他仓库。' : '没有发现仓库，可调整扫描层级或选择其他文件夹。');
+      }
     });
   }
 
   function chooseRepository() {
-    return openPath();
+    return openFolder();
   }
 
   async function refresh(path = activeRoot.current, openConflicts = false) {
@@ -423,11 +485,9 @@ export function App() {
     const next = await call<Status>('repository_status', { root: path });
     if (activeRoot.current === path) {
       setStatus(next);
-      void Promise.allSettled(
-        next.changes
-          .filter((change) => !change.conflict && change.index !== 'D' && change.workTree !== 'D')
-          .map((change) => call('local_history_capture', { root: path, path: change.path, reason: 'Git 工作区刷新' })),
-      );
+      historyCapture.current?.enqueue(path, next.changes
+        .filter(change => !change.conflict && change.index !== 'D' && change.workTree !== 'D')
+        .map(change => change.path));
       setVersion((v) => v + 1);
       setTarget(previous => {
         if (!previous || previous.revision !== null) return previous;
@@ -680,6 +740,9 @@ export function App() {
         if (next && await openPath(next, false, true)) {
           if (session && (!path || path === session.root) && activeRoot.current === session.root) setRepositoryMessage(session.root, session.message);
           if (session) save(UPDATE_SESSION, null);
+        } else if (!next && startupOpen.current) {
+          const folder = readSaved<unknown>('workspace.lastFolder', '');
+          if (typeof folder === 'string' && folder) await openFolder(folder, true);
         }
       })
       .catch((e) => setError(String(e)));
@@ -950,7 +1013,7 @@ export function App() {
         </div>
       </header>
 
-      {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy}
+      {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy} summaries={workspaceSummaries}
         onSelect={path => { if (path !== root) void openPath(path, false, false, true); }}
         onManage={() => setShowWorkspace(true)} onClose={() => setWorkspace(null)} />}
 
@@ -984,7 +1047,7 @@ export function App() {
             <h1>IdeaGitTool</h1>
           </div>
           <p>Git 工作区</p>
-          <button disabled={!!busy} onClick={() => { startupOpen.current = false; setShowWorkspace(true); }}>打开包含多个仓库的文件夹</button>
+          <button disabled={!!busy} onClick={() => void openFolder()}>打开包含多个仓库的文件夹</button>
           <button disabled={!!busy} onClick={() => setShowClone(true)}>克隆远程仓库</button>
           <button class="primary" disabled={!!busy} onClick={() => void chooseRepository()}>
             <Icon name="general/open" />
@@ -1464,15 +1527,11 @@ export function App() {
             }
           }} />
       </footer>
-      {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} currentRoot={root} onClose={() => setShowWorkspace(false)}
+      {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} autoScan={!!workspace} currentRoot={root} onClose={() => setShowWorkspace(false)}
         onOpen={async (nextWorkspace, repository, depth) => {
           const success = await openPath(repository.root, false, false, true);
           if (success && activeRoot.current === repository.root) {
-            setWorkspace(nextWorkspace);
-            try {
-              save('workspace.lastFolder', nextWorkspace.root);
-              save('workspace.scanDepth', depth);
-            } catch { setNotice('工作区已打开，本次无法记住路径和扫描层级。'); }
+            rememberWorkspace(nextWorkspace, repository.root, depth);
             return true;
           }
           return false;

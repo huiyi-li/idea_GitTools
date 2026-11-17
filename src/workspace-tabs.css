@@ -1,0 +1,96 @@
+.workspace-repository-bar.repository-tabs-bar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+}
+.repository-tabs-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.repository-count { flex: none; font-size: 12px; font-weight: 600; }
+.repository-workspace-path {
+  flex: 1 1 140px;
+  min-width: 0;
+  color: var(--fg-info);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.repository-tabs-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; min-width: 0; margin-left: auto; }
+.repository-tabs-actions > button { padding: 3px 7px; }
+.repository-tabs-actions .tool-button { height: 26px; max-width: 100%; }
+.repository-scan-warning { color: var(--fg-warning); font-size: 11px; }
+.repository-tablist {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-control) transparent;
+}
+.repository-tablist > .repository-tab {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  min-width: 118px;
+  max-width: 320px;
+  min-height: 47px;
+  padding: 6px 13px 7px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  text-align: left;
+}
+.repository-tablist > .repository-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  background: var(--bg-selection-inactive);
+}
+.repository-tablist > .repository-tab:hover { background: var(--bg-action-hover); }
+.repository-tablist > .repository-tab:focus-visible { outline: 1px solid var(--focus); outline-offset: -3px; }
+.repository-tab[aria-disabled='true'] { cursor: default; }
+.repository-tab[aria-disabled='true'] > span { opacity: .65; }
+.repository-tab-title { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.repository-tab-title strong { overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 500; }
+.repository-color { display: inline-block; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 2px; background: var(--repository-color); }
+.repository-tab-summary { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--fg-info); }
+.repository-tab-summary.has-conflicts { color: var(--fg-warning); }
+.repository-tab-summary.has-error { color: var(--fg-error); }
+.repository-unavailable, .repository-empty { margin: 0; padding: 6px 10px; overflow-wrap: anywhere; font-size: 12px; }
+.repository-unavailable { background: var(--bg-banner-warning); color: var(--fg-warning); }
+.repository-empty { color: var(--fg-info); }
+.repository-search { width: min(370px, calc(100vw - 30px)); min-width: 0; padding: 3px; }
+.repository-search > input { width: 100%; min-width: 0; margin-bottom: 5px; }
+.repository-search-results { display: grid; max-height: min(380px, 55vh); overflow-y: auto; overscroll-behavior: contain; }
+.repository-search-results > .repository-search-item { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 7px 8px; text-align: left; white-space: normal; }
+.repository-search-item > .repository-color { margin-top: 4px; }
+.repository-search-item[aria-pressed='true'] { background: var(--bg-selection-inactive); }
+.repository-search-item:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.repository-search-text { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.repository-search-text > strong { font-size: 12px; font-weight: 500; }
+.repository-search-text > small { color: var(--fg-info); font-size: 11px; }
+.repository-search-empty { padding: 8px; margin: 0; color: var(--fg-info); }
+@media (max-width: 600px) {
+  .repository-tabs-heading { gap: 4px 8px; padding: 4px 6px; }
+  .repository-tabs-actions { margin-left: 0; }
+  .repository-tablist > .repository-tab { max-width: 240px; padding-right: 10px; padding-left: 10px; }
+}
