@@ -31,6 +31,17 @@ struct MultiRepositoryCommit {
     commit: Commit,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiRepositoryBranchInfo {
+    root: String,
+    name: String,
+    current_branch: Option<String>,
+    head: Option<String>,
+    dirty: bool,
+    branches: Vec<String>,
+}
+
 // One active repository and one operation at a time. A queued request carries its
 // repository root, so switching repositories cannot redirect a pending write.
 #[derive(Default)]
@@ -244,6 +255,71 @@ async fn multi_repository_sync(roots: Vec<String>, action: String, state: State<
             Ok(output) if output.is_empty() => format!("{root}: 完成"),
             Ok(output) => format!("{root}: {output}"),
             Err(error) => format!("{root}: 失败：{error}"),
+        });
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+async fn multi_repository_branches(
+    roots: Vec<String>,
+) -> Result<Vec<MultiRepositoryBranchInfo>, String> {
+    let repositories = checked_repositories(roots).await?;
+    let mut infos = Vec::with_capacity(repositories.len());
+    for git in repositories {
+        let status = git.status().await?;
+        let branches = status
+            .branches
+            .into_iter()
+            .filter(|b| !b.remote)
+            .map(|b| b.name)
+            .collect();
+        infos.push(MultiRepositoryBranchInfo {
+            root: git.root_string(),
+            name: status.repository.name,
+            current_branch: status.repository.branch,
+            head: status.repository.head,
+            dirty: !status.changes.is_empty(),
+            branches,
+        });
+    }
+    Ok(infos)
+}
+
+#[tauri::command]
+async fn multi_repository_branch_action(
+    roots: Vec<String>,
+    action: String,
+    branch: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let branch = branch.trim().to_owned();
+    if branch.is_empty() {
+        return Err("请输入目标分支名称".into());
+    }
+    let _lease = state.0.lock().await;
+    let repositories = checked_repositories(roots).await?;
+    let mut results = Vec::with_capacity(repositories.len());
+    for git in repositories {
+        let root = git.root_string();
+        let outcome = match action.as_str() {
+            "checkout" => git
+                .checkout(&branch)
+                .await
+                .map(|()| format!("已切换到分支 {branch}")),
+            "create" => git
+                .create_branch(&branch)
+                .await
+                .map(|()| format!("已新建并切换到分支 {branch}")),
+            "delete" => git
+                .delete_merged_branch(&branch)
+                .await
+                .map(|()| format!("已删除本地分支 {branch}")),
+            _ => Err("不支持的跨仓库分支操作".into()),
+        };
+        results.push(match outcome {
+            Ok(msg) => format!("{root}: {msg}"),
+            Err(err) => format!("{root}: 失败：{err}"),
         });
     }
     Ok(results)
@@ -1323,6 +1399,8 @@ pub fn run() {
             write_patch_file,
             multi_repository_log,
             multi_repository_sync,
+            multi_repository_branches,
+            multi_repository_branch_action,
             multi_repository_history_action,
             read_diff,
             save_worktree_file,

@@ -196,6 +196,36 @@ test('late multi-repository log results cannot restore a removed repository', as
   assert.ok(!host.textContent?.includes('stale-commit'));
 });
 
+test('multi-repository synchronous branch control lists shared branches and executes batch checkout', async () => {
+  localStorage.setItem('multi.repositories', JSON.stringify(['C:/a', 'C:/b']));
+  let executed: any;
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'multi_repository_branches') {
+      return [
+        { root: 'C:/a', name: 'repo-a', currentBranch: 'main', head: 'a'.repeat(40), dirty: false, branches: ['main', 'feature/sync'] },
+        { root: 'C:/b', name: 'repo-b', currentBranch: 'main', head: 'b'.repeat(40), dirty: true, branches: ['main', 'feature/sync'] },
+      ];
+    }
+    if (command === 'multi_repository_branch_action') {
+      executed = args;
+      return ['C:/a: 已切换到分支 feature/sync', 'C:/b: 已切换到分支 feature/sync'];
+    }
+    throw Error(command);
+  };
+  render(<MultiRepositoryDialog currentRoot="C:/a" onClose={noClose} />, host);
+  button('跨仓库同步分支').click();
+  await waitFor(() => host.textContent?.includes('feature/sync (2/2)'));
+  button('feature/sync (2/2)').click();
+  button('批量执行分支操作').click();
+  await waitFor(() => executed);
+  assert.deepEqual(executed, {
+    roots: ['C:/a', 'C:/b'],
+    action: 'checkout',
+    branch: 'feature/sync',
+  });
+  await waitFor(() => host.textContent?.includes('C:/a: 已切换到分支 feature/sync'));
+});
+
 test('local history restore requires confirmation and sends the reviewed worktree stamp', async () => {
   const entry = { id: 'snapshot', path: 'file.txt', timestamp: 1700000000000, reason: 'saved', size: 3, binary: false };
   let restored: any;

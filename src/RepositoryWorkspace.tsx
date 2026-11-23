@@ -155,13 +155,14 @@ function RepositorySearch({ repositories, root, busy, summaries, onSelect }: {
   </div>;
 }
 
-export function WorkspaceRepositoryBar({ workspace, root, busy, summaries, onSelect, onManage, onClose }: {
+export function WorkspaceRepositoryBar({ workspace, root, busy, summaries, onSelect, onManage, onMultiRepo, onClose }: {
   workspace: WorkspaceRepositories;
   root: string;
   busy: boolean;
   summaries?: RepositorySummaries;
   onSelect: (root: string) => void;
   onManage: () => void;
+  onMultiRepo?: () => void;
   onClose: () => void;
 }) {
   const tabs = useRef(new Map<string, HTMLButtonElement>());
@@ -191,6 +192,11 @@ export function WorkspaceRepositoryBar({ workspace, root, busy, summaries, onSel
         <ActionMenu label={`全部仓库 (${repositories.length})`} text={`全部仓库 (${repositories.length})`} icon="nodes/folder" disabled={busy}>
           <RepositorySearch repositories={repositories} root={root} busy={busy} summaries={summaries} onSelect={select} />
         </ActionMenu>
+        {onMultiRepo && repositories.length > 1 && (
+          <button type="button" disabled={busy} onClick={() => { if (!busy) onMultiRepo(); }}>
+            跨仓日志与同步分支…
+          </button>
+        )}
         <button type="button" disabled={busy} onClick={() => { if (!busy) onManage(); }}>管理 / 重新扫描…</button>
         <ToolButton icon="general/close" label="关闭工作区列表（不删除仓库）" disabled={busy} onClick={() => { if (!busy) onClose(); }} />
       </span>

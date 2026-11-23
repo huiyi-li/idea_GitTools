@@ -982,6 +982,15 @@ impl Git {
         Ok(())
     }
 
+    pub async fn delete_merged_branch(&self, name: &str) -> Result<(), String> {
+        if name.is_empty() || name.starts_with('-') || name.len() > 1024 {
+            return Err("Enter a valid branch name.".into());
+        }
+        self.bytes(&["check-ref-format", "--branch", name]).await?;
+        self.bytes(&["branch", "-d", "--", name]).await?;
+        Ok(())
+    }
+
     pub async fn remote_action(&self, action: &str) -> Result<String, String> {
         let args: &[&str] = match action {
             "fetch" => &["fetch", "--all"],

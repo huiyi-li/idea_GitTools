@@ -1136,7 +1136,7 @@ export function App() {
 
       {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy} summaries={workspaceSummaries}
         onSelect={path => { if (path !== root) void openPath(path, false, false, true); }}
-        onManage={() => setShowWorkspace(true)} onClose={() => setWorkspace(null)} />}
+        onManage={() => setShowWorkspace(true)} onMultiRepo={() => setShowMultiRepository(true)} onClose={() => setWorkspace(null)} />}
 
       {error && (
         <div class="message error-message" role="alert">
@@ -1726,7 +1726,16 @@ export function App() {
       {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}-${interactiveAction?.hash ?? ''}-${interactiveAction?.action ?? ''}`} root={root} initialBase={interactiveBase} initialAction={interactiveAction} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={`${root}-${fileHistoryTab}-${fileHistoryRevision ?? ''}`} root={root} initialPath={target?.path ?? ''} initialRevision={fileHistoryRevision ?? target?.revision} initialTab={fileHistoryTab} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
-      {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} />}
+      {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} workspaceRoots={workspace?.repositories.map((r) => r.root)} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} onOpenCommit={(targetRoot, commitHash) => {
+        setShowMultiRepository(false);
+        void (async () => {
+          if (targetRoot !== root) {
+            await openPath(targetRoot, true, false, true);
+          }
+          setView('log');
+          setSelected(commitHash);
+        })();
+      }} />}
       {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={(openConflicts) => refresh(root, openConflicts ?? true)} />}
 
       {mergePath !== null && (
