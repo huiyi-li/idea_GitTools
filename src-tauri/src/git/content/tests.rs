@@ -209,3 +209,31 @@ async fn a_hundred_thousand_lines_can_be_reviewed_and_refreshed() {
     assert!(current.file.text.starts_with("edit\n"));
     assert_ne!(review.current.file.fingerprint, current.file.fingerprint);
 }
+
+#[tokio::test]
+async fn lightweight_worktree_edit_preserves_crlf_records_local_history_and_rejects_stale_files() {
+    let directory = fixture();
+    let git = Git::open(directory.path().to_str().unwrap(), None)
+        .await
+        .unwrap();
+    let file = directory.path().join("edit.txt");
+    fs::write(&file, "first\r\nsecond\r\n").unwrap();
+    git.save_worktree_file("edit.txt", "first\nupdated\n", "first\nsecond\n")
+        .await
+        .unwrap();
+    assert_eq!(fs::read(&file).unwrap(), b"first\r\nupdated\r\n");
+    assert!(git
+        .save_worktree_file("edit.txt", "stale\n", "first\nsecond\n")
+        .await
+        .is_err());
+    assert!(!git.local_history_list("edit.txt").await.unwrap().is_empty());
+    assert_eq!(
+        git.resolve_worktree_file("edit.txt").unwrap(),
+        file.canonicalize().unwrap()
+    );
+    assert!(git.resolve_worktree_file("missing.txt").is_err());
+    assert_eq!(
+        git.resolve_reveal_path("nested/missing.txt").unwrap(),
+        git.root
+    );
+}

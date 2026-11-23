@@ -322,6 +322,61 @@ async fn read_diff(
 }
 
 #[tauri::command]
+async fn save_worktree_file(
+    root: String,
+    path: String,
+    content: String,
+    expected: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .save_worktree_file(&path, &content, &expected)
+        .await
+}
+
+#[tauri::command]
+async fn open_in_editor(
+    root: String,
+    path: String,
+    line: Option<usize>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let file_path = active(&*state.0.lock().await, &root)?.resolve_worktree_file(&path)?;
+    if let Some(line_num) = line.filter(|&l| l > 0) {
+        let goto = format!("{}:{line_num}", file_path.to_string_lossy());
+        let mut cmd = std::process::Command::new(if cfg!(windows) { "code.cmd" } else { "code" });
+        cmd.args(["--reuse-window", "--goto", &goto]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+        if cmd.status().is_ok_and(|s| s.success()) {
+            return Ok(());
+        }
+    }
+    app.opener()
+        .open_path(file_path.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("打开外部编辑器失败：{e}"))
+}
+
+#[tauri::command]
+async fn reveal_in_explorer(
+    root: String,
+    path: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let target = active(&*state.0.lock().await, &root)?.resolve_reveal_path(&path)?;
+    app.opener()
+        .reveal_item_in_dir(&target)
+        .map_err(|e| format!("在资源管理器中显示失败：{e}"))
+}
+
+#[tauri::command]
 async fn read_commit_review(
     root: String,
     revision: String,
@@ -1097,6 +1152,9 @@ pub fn run() {
             multi_repository_sync,
             multi_repository_history_action,
             read_diff,
+            save_worktree_file,
+            open_in_editor,
+            reveal_in_explorer,
             read_commit_review,
             read_review_worktree,
             local_history_list,

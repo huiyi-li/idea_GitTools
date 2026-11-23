@@ -73,6 +73,17 @@ function readRepositoryDraft(root: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+function historySignature(status: Status): string {
+  return JSON.stringify([
+    status.repository.root,
+    status.repository.head,
+    status.repository.branch,
+    status.repository.operation,
+    status.branches,
+    status.stashes,
+  ]);
+}
+
 function ChangeList({
   changes,
   selected,
@@ -83,8 +94,11 @@ function ChangeList({
   onDiscard,
   onIgnore,
   onAssign,
+  onOpenExternal,
+  onRevealExternal,
   changeLists,
   unstage,
+  groupByDir,
   busy,
 }: {
   changes: Change[];
@@ -96,70 +110,116 @@ function ChangeList({
   onDiscard?: (changes: Change[], mode: DiscardMode) => void;
   onIgnore?: (path: string) => void;
   onAssign?: (change: Change) => void;
+  onOpenExternal?: (path: string) => void;
+  onRevealExternal?: (path: string) => void;
   changeLists?: ChangeListGroup[];
   unstage?: boolean;
+  groupByDir?: boolean;
   busy: boolean;
 }) {
-  return (
-    <div class="file-list" role="list" aria-label="文件列表">
-      {changes.map((change) => (
-        <div
-          class={`file-row ${selected === change.path ? 'selected' : ''}`}
-          key={change.path}
-          role="listitem"
+  function renderRow(change: Change, hideDir = false) {
+    return (
+      <div
+        class={`file-row ${selected === change.path ? 'selected' : ''}`}
+        key={change.path}
+        role="listitem"
+      >
+        <button
+          class="file-select"
+          onClick={() => onSelect(change)}
+          onDblClick={() => { if (!busy) onOpen?.(change); }}
+          onKeyDown={(event) => {
+            if (onOpen && !busy && event.key === 'Enter') {
+              event.preventDefault();
+              onSelect(change);
+              onOpen(change);
+            }
+          }}
+          title={change.oldPath ? `${change.oldPath} → ${change.path}` : change.path}
         >
-          <button
-            class="file-select"
-            onClick={() => onSelect(change)}
-            onDblClick={() => { if (!busy) onOpen?.(change); }}
-            onKeyDown={(event) => {
-              if (onOpen && !busy && event.key === 'Enter') {
-                event.preventDefault();
-                onSelect(change);
-                onOpen(change);
-              }
-            }}
-            title={change.oldPath ? `${change.oldPath} → ${change.path}` : change.path}
-          >
-            <span class={`file-status ${change.conflict ? 'conflict' : ''}`}>
-              {change.conflict ? 'U' : change.index === ' ' ? change.workTree : change.index}
-            </span>
-            <FileIcon path={change.path} />
-            <span class="file-name ellipsis">{change.path.split('/').pop()}</span>
+          <span class={`file-status ${change.conflict ? 'conflict' : ''}`}>
+            {change.conflict ? 'U' : change.index === ' ' ? change.workTree : change.index}
+          </span>
+          <FileIcon path={change.path} />
+          <span class="file-name ellipsis">{change.path.split('/').pop()}</span>
+          {!hideDir && (
             <span class="file-directory ellipsis">
               {change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : ''}
             </span>
+          )}
+        </button>
+        {onStage && (
+          <button
+            class="file-action"
+            disabled={busy || change.conflict}
+            title={unstage ? '取消暂存' : '暂存此文件'}
+            aria-label={`${unstage ? '取消暂存' : '暂存'} ${change.path}`}
+            onClick={() => onStage([change], !!unstage)}
+          >
+            <Icon name={unstage ? 'general/remove' : 'general/add'} />
+            <span>{unstage ? '取消暂存' : '暂存'}</span>
           </button>
-          {onStage && (
-            <button
-              class="file-action"
-              disabled={busy || change.conflict}
-              title={unstage ? '取消暂存' : '暂存此文件'}
-              aria-label={`${unstage ? '取消暂存' : '暂存'} ${change.path}`}
-              onClick={() => onStage([change], !!unstage)}
-            >
-              <Icon name={unstage ? 'general/remove' : 'general/add'} />
-              <span>{unstage ? '取消暂存' : '暂存'}</span>
-            </button>
-          )}
-          {onDiscard && (
-            <ActionMenu label={`文件操作 ${change.path}`} text="操作" disabled={busy || change.conflict}>
-              {!unstage && (
-                <button onClick={() => onDiscard([change], 'unstaged')}>放弃未暂存更改…</button>
-              )}
-              {unstage && <button onClick={() => onStage?.([change], true)}>取消暂存</button>}
-              {onHunks && (
-                <button onClick={() => onHunks(change, unstage ? 'staged' : 'unstaged')}>
-                  {unstage ? '按块／按行取消暂存…' : '按块／按行暂存…'}
-                </button>
-              )}
-              {onAssign && changeLists && <button onClick={() => onAssign(change)}>移动到 Changelist…</button>}
-              <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
-              {onIgnore && <button onClick={() => onIgnore(change.path)}>忽略规则／停止跟踪…</button>}
-            </ActionMenu>
-          )}
-        </div>
-      ))}
+        )}
+        {onDiscard && (
+          <ActionMenu label={`文件操作 ${change.path}`} text="操作" disabled={busy || change.conflict}>
+            {!unstage && (
+              <button onClick={() => onDiscard([change], 'unstaged')}>放弃未暂存更改…</button>
+            )}
+            {unstage && <button onClick={() => onStage?.([change], true)}>取消暂存</button>}
+            {onHunks && (
+              <button onClick={() => onHunks(change, unstage ? 'staged' : 'unstaged')}>
+                {unstage ? '按块／按行取消暂存…' : '按块／按行暂存…'}
+              </button>
+            )}
+            {onAssign && changeLists && <button onClick={() => onAssign(change)}>移动到 Changelist…</button>}
+            <button onClick={() => onDiscard([change], 'all')}>放弃此文件全部更改…</button>
+            {onIgnore && <button onClick={() => onIgnore(change.path)}>忽略规则／停止跟踪…</button>}
+            {(onOpenExternal || onRevealExternal) && <hr />}
+            {onOpenExternal && change.workTree !== 'D' && change.index !== 'D' && (
+              <button onClick={() => onOpenExternal(change.path)}>在外部编辑器中打开</button>
+            )}
+            {onRevealExternal && (
+              <button onClick={() => onRevealExternal(change.path)}>在资源管理器中显示</button>
+            )}
+          </ActionMenu>
+        )}
+      </div>
+    );
+  }
+
+  function renderGrouped() {
+    const dirs = new Map<string, Change[]>();
+    const rootFiles: Change[] = [];
+    for (const change of changes) {
+      const slash = change.path.lastIndexOf('/');
+      if (slash > 0) {
+        const dir = change.path.slice(0, slash);
+        dirs.set(dir, [...(dirs.get(dir) ?? []), change]);
+      } else {
+        rootFiles.push(change);
+      }
+    }
+    return (
+      <>
+        {[...dirs.entries()].map(([dir, list]) => (
+          <details class="tree-group file-dir-group" open key={`dir-${dir}`}>
+            <summary class="file-group-heading">
+              <Icon name="general/chevronRight" class="tree-chevron" />
+              <Icon name="nodes/folder" />
+              <span class="ellipsis">{dir}</span>
+              <span class="tree-hint">{list.length}</span>
+            </summary>
+            {list.map((change) => renderRow(change, true))}
+          </details>
+        ))}
+        {rootFiles.map((change) => renderRow(change, true))}
+      </>
+    );
+  }
+
+  return (
+    <div class="file-list" role="list" aria-label="文件列表">
+      {groupByDir ? renderGrouped() : changes.map((change) => renderRow(change))}
       {!changes.length && <div class="empty small">暂无文件</div>}
     </div>
   );
@@ -179,6 +239,8 @@ export function App() {
   const [discardError, setDiscardError] = useState('');
   const [notice, setNotice] = useState('');
   const [version, setVersion] = useState(0);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const lastHistorySignature = useRef('');
   const [page, setPage] = useState<LogPage>(EMPTY_PAGE);
   const [offset, setOffset] = useState(0);
   const [searchInput, setSearchInput] = useState('');
@@ -239,6 +301,7 @@ export function App() {
   const workspaceSummaries = useWorkspaceSummaries(workspace, status);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
+  const [groupFilesByDir, setGroupFilesByDir] = useState(() => readSaved<boolean>('changes.groupByDir', false) === true);
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
   const [mergePath, setMergePath] = useState<string | null>(null);
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
@@ -280,6 +343,10 @@ export function App() {
   }, [diffPreview]);
 
   useEffect(() => {
+    try { save('changes.groupByDir', groupFilesByDir); } catch { /* Keep the session preference. */ }
+  }, [groupFilesByDir]);
+
+  useEffect(() => {
     let disposed = false;
     const subscription = listen<string>('git-console', (event) => {
       if (!disposed) setConsoleLines((lines) => [...lines, event.payload.slice(0, 4096)].slice(-120));
@@ -309,7 +376,7 @@ export function App() {
       if (current && activeRoot.current === root) { setRecovery(value); setLiveOperation(null); setRecoveryError(''); }
     }).catch((e) => { if (current && activeRoot.current === root) setRecoveryError(String(e)); });
     return () => { current = false; };
-  }, [root, version]);
+  }, [root, historyVersion]);
 
   useEffect(() => {
     if (!commitContext) return;
@@ -426,7 +493,9 @@ export function App() {
       setTransfer(null);
       setShowMultiRepository(false);
       setWorkspace(previous => previous?.repositories.some(repository => repository.root === next.repository.root) ? previous : null);
+      lastHistorySignature.current = historySignature(next);
       setVersion((v) => v + 1);
+      setHistoryVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
       try { save('recent', paths); }
@@ -480,15 +549,19 @@ export function App() {
     return openFolder();
   }
 
-  async function refresh(path = activeRoot.current, openConflicts = false) {
+  async function refresh(path = activeRoot.current, openConflicts = false, forceHistory = false) {
     if (!path) return;
     const next = await call<Status>('repository_status', { root: path });
     if (activeRoot.current === path) {
+      const signature = historySignature(next);
+      const historyChanged = forceHistory || signature !== lastHistorySignature.current;
+      lastHistorySignature.current = signature;
       setStatus(next);
       historyCapture.current?.enqueue(path, next.changes
         .filter(change => !change.conflict && change.index !== 'D' && change.workTree !== 'D')
         .map(change => change.path));
       setVersion((v) => v + 1);
+      if (historyChanged) setHistoryVersion((v) => v + 1);
       setTarget(previous => {
         if (!previous || previous.revision !== null) return previous;
         const matching = next.changes.filter((change) => change.path === previous.path);
@@ -783,7 +856,7 @@ export function App() {
     return () => {
       current = false;
     };
-  }, [root, offset, search, branch, logFilters, version, view]);
+  }, [root, offset, search, branch, logFilters, historyVersion, view]);
 
   useEffect(() => {
     let current = true;
@@ -819,7 +892,7 @@ export function App() {
       current = false;
       clearTimeout(timer);
     };
-  }, [root, selected, version, view]);
+  }, [root, selected, historyVersion, view]);
 
   useEffect(() => {
     if (!root) return;
@@ -858,7 +931,7 @@ export function App() {
       if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
       if (event.key === 'F5') {
         event.preventDefault();
-        if (root) void perform('刷新', () => refresh());
+        if (root) void perform('刷新', () => refresh(undefined, false, true));
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
         event.preventDefault();
@@ -997,7 +1070,7 @@ export function App() {
             icon="general/refresh"
             label="刷新 · F5"
             disabled={!root || !!busy}
-            onClick={() => void perform('刷新', () => refresh())}
+            onClick={() => void perform('刷新', () => refresh(undefined, false, true))}
           />
           <ToolButton
             icon="general/open"
@@ -1217,7 +1290,7 @@ export function App() {
                       </div>
                     </section>
                     {diffPreview && mergePath === null && !review ? (
-                      <DiffView key={root} root={root} target={target} version={version} />
+                      <DiffView key={root} root={root} target={target} version={target?.revision ? historyVersion : version} />
                     ) : (
                       <div />
                     )}
@@ -1228,6 +1301,12 @@ export function App() {
                       <span>变更文件</span>
                       <span class="tree-hint">{details?.changes.length ?? 0}</span>
                       <span class="spacer" />
+                      <ToolButton
+                        icon="nodes/folder"
+                        label="按目录分组文件"
+                        active={groupFilesByDir}
+                        onClick={() => setGroupFilesByDir(!groupFilesByDir)}
+                      />
                       <ActionMenu label="提交操作" text="操作" disabled={!selectedCommit || !!busy}>
                         <button disabled={status.repository.operation !== 'none'} onClick={() => selectedCommit && void previewNavigation(selectedCommit.hash)}>签出此提交…</button>
                         <button disabled={status.repository.operation !== 'none'} onClick={() => selectedCommit && void previewNavigation(selectedCommit.hash, 'checkout', true)}>从此提交创建分支…</button>
@@ -1272,6 +1351,7 @@ export function App() {
                         <ChangeList
                           changes={details.changes}
                           selected={target?.path}
+                          groupByDir={groupFilesByDir}
                           busy={!!busy}
                           onOpen={(change) => setReview({ root, details, path: change.path })}
                           onSelect={(change) =>
@@ -1327,6 +1407,12 @@ export function App() {
                     </label>
                     <button disabled={!!busy} onClick={() => { setNewChangeListName(''); setChangeListTarget(null); setNewChangeListDialog(true); }}>新建 Changelist</button>
                     <span class="spacer" />
+                    <ToolButton
+                      icon="nodes/folder"
+                      label="按目录分组文件"
+                      active={groupFilesByDir}
+                      onClick={() => setGroupFilesByDir(!groupFilesByDir)}
+                    />
                     <ActionMenu label="本地更改操作" text="操作" disabled={!!busy || !status.changes.length || !!conflicts.length}>
                       <button onClick={() => void previewDiscard(status.changes.map(change => change.path), 'all')}>放弃全部本地更改…</button>
                     </ActionMenu>
@@ -1390,7 +1476,10 @@ export function App() {
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
                         onIgnore={setIgnorePath}
                         onAssign={(change) => setChangeListTarget(change)}
+                        onOpenExternal={(path) => void call('open_in_editor', { root, path }).catch((e) => setError(String(e)))}
+                        onRevealExternal={(path) => void call('reveal_in_explorer', { root, path }).catch((e) => setError(String(e)))}
                         changeLists={changeLists}
+                        groupByDir={groupFilesByDir}
                         busy={!!busy}
                       />
                     </details>
@@ -1419,8 +1508,11 @@ export function App() {
                         onHunks={(change, area) => setHunks({ path: change.path, area })}
                         onIgnore={setIgnorePath}
                         onAssign={(change) => setChangeListTarget(change)}
+                        onOpenExternal={(path) => void call('open_in_editor', { root, path }).catch((e) => setError(String(e)))}
+                        onRevealExternal={(path) => void call('reveal_in_explorer', { root, path }).catch((e) => setError(String(e)))}
                         changeLists={changeLists}
                         unstage
+                        groupByDir={groupFilesByDir}
                         busy={!!busy}
                       />
                     </details>
@@ -1442,7 +1534,7 @@ export function App() {
                         {messageHistory.map((item, index) => <option key={`${item}-${index}`} value={item}>{item}</option>)}
                       </select>
                     </label>
-                    <button type="button" disabled={!!busy || !stagedFiles.length} onClick={() => void generateCommitMessage()}>AI 提交说明</button>
+                    <button type="button" title="根据已暂存文件的变更类型和路径，使用本地规则生成提交说明摘要" disabled={!!busy || !stagedFiles.length} onClick={() => void generateCommitMessage()}>生成变更摘要</button>
                     <button disabled={!!busy || !status.repository.head || !['none', 'rebase'].includes(status.repository.operation)} onClick={() => setShowAmend(true)}>Amend 最近提交…</button>
                     <textarea
                       id="commit-message"
@@ -1473,7 +1565,7 @@ export function App() {
                     </button>
                   </div>
                 </section>
-                {mergePath === null ? <DiffView key={root} root={root} target={target} version={version} /> : <div />}
+                {mergePath === null ? <DiffView key={root} root={root} target={target} version={version} onSaved={() => void refresh(root)} /> : <div />}
               </Split>
             )}
           </div>
@@ -1580,6 +1672,7 @@ export function App() {
             initialPath={review.path}
             version={version}
             onClose={() => setReview(null)}
+            onSaved={() => void refresh(review.root)}
           />
         </Suspense>
       )}

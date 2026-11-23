@@ -1,9 +1,10 @@
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, drawSelection, keymap, lineNumbers } from '@codemirror/view';
-import { defaultKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import { syntaxTheme } from '../merge/theme';
+import { buildChanges } from '../shared/intellijDiff';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from '../ui/minimap';
 import { lineAnchors, mapLine, type LineAnchors } from './line-map';
 import { diffLineHighlights } from '../ui/diff-highlights';
@@ -46,6 +47,8 @@ export class ReviewController {
   private readonly minimap = new Compartment();
   private readonly language = new Compartment();
   private readonly syntax = new Compartment();
+  private readonly currentEdit = new Compartment();
+  private currentEditable = false;
   private languageSupport: Extension = [];
   private disposed = false;
   private index = -1;
@@ -62,6 +65,8 @@ export class ReviewController {
     scope: Scope,
     minimapEnabled: boolean,
     private readonly onNavigate: (index: number) => void,
+    private readonly onCurrentChange?: (text: string) => void,
+    private readonly onSaveShortcut?: () => void,
   ) {
     this.current = document.current.file;
     this.diffs = diffs;
@@ -99,8 +104,42 @@ export class ReviewController {
     return !!(this.document.before.large || this.document.after.large || this.current.large);
   }
 
+  private currentEditExtensions(editable: boolean): Extension {
+    return editable
+      ? [
+          EditorState.readOnly.of(false),
+          EditorView.editable.of(true),
+          EditorView.contentAttributes.of({
+            tabindex: '0',
+            'aria-label': '当前工作区代码',
+            'aria-readonly': 'false',
+          }),
+          history(),
+          keymap.of([
+            ...historyKeymap,
+            {
+              key: 'Mod-s',
+              run: () => {
+                this.onSaveShortcut?.();
+                return true;
+              },
+            },
+          ]),
+        ]
+      : [
+          EditorState.readOnly.of(true),
+          EditorView.editable.of(false),
+          EditorView.contentAttributes.of({
+            tabindex: '0',
+            'aria-label': '当前工作区代码',
+            'aria-readonly': 'true',
+          }),
+        ];
+  }
+
   private create(pane: Pane, snapshot: FileSnapshot) {
     if (!readable(snapshot)) return;
+    const isCurrent = pane === 'current';
     const view = new EditorView({
       parent: this.hosts[pane],
       doc: snapshot.text.replace(/\r\n/g, '\n'),
@@ -109,15 +148,41 @@ export class ReviewController {
         drawSelection(),
         keymap.of(defaultKeymap),
         theme,
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-        EditorView.contentAttributes.of({
-          tabindex: '0',
-          'aria-label': { before: '修改前代码', after: '修改后代码', current: '当前工作区代码' }[
-            pane
-          ],
-          'aria-readonly': 'true',
-        }),
+        ...(isCurrent
+          ? [
+              this.currentEdit.of(
+                this.currentEditExtensions(this.currentEditable && snapshot.state === 'text'),
+              ),
+              EditorView.updateListener.of((update) => {
+                if (update.docChanged) {
+                  const text = update.state.doc.toString();
+                  this.onCurrentChange?.(text);
+                  if (!this.large && readable(this.document.after)) {
+                    const beforeText = this.document.after.text.replace(/\r\n/g, '\n');
+                    const changes = buildChanges(beforeText.split('\n'), text.split('\n'));
+                    this.diffs = {
+                      ...this.diffs,
+                      current: { before: beforeText, after: text, changes },
+                    };
+                    this.anchors.current = lineAnchors(
+                      changes,
+                      this.views.after?.state.doc.lines ?? 1,
+                      update.state.doc.lines,
+                    );
+                    if (this.scope === 'current') this.highlight();
+                  }
+                }
+              }),
+            ]
+          : [
+              EditorState.readOnly.of(true),
+              EditorView.editable.of(false),
+              EditorView.contentAttributes.of({
+                tabindex: '0',
+                'aria-label': { before: '修改前代码', after: '修改后代码' }[pane],
+                'aria-readonly': 'true',
+              }),
+            ]),
         diffLineHighlights,
         minimapRanges,
         this.minimap.of(this.minimapEnabled && !this.large ? codeMinimap() : []),
@@ -129,6 +194,26 @@ export class ReviewController {
     const listener = () => this.scroll(pane);
     this.listeners.set(pane, listener);
     view.scrollDOM.addEventListener('scroll', listener);
+  }
+
+  setCurrentEditable(editable: boolean) {
+    this.currentEditable = editable;
+    const view = this.views.current;
+    if (!view) return;
+    const allow = editable && this.current.state === 'text';
+    view.dispatch({
+      effects: this.currentEdit.reconfigure(this.currentEditExtensions(allow)),
+    });
+    if (allow) view.focus();
+  }
+
+  resetCurrentText() {
+    const view = this.views.current;
+    if (!view) return;
+    const normalized = this.current.text.replace(/\r\n/g, '\n');
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: normalized },
+    });
   }
 
   private remove(pane: Pane) {
@@ -207,6 +292,8 @@ export class ReviewController {
   private highlight() {
     const data = this.diffs[this.scope];
     const pair: [Pane, Pane] = this.scope === 'commit' ? ['before', 'after'] : ['after', 'current'];
+    const beforeLines = data ? data.before.split('\n') : [];
+    const afterLines = data ? data.after.split('\n') : [];
     for (const pane of panes) {
       const view = this.views[pane];
       if (!view) continue;
@@ -216,10 +303,21 @@ export class ReviewController {
         for (const change of data.changes) {
           const start = side === 0 ? change.line0 : change.line1;
           const count = side === 0 ? change.deleted : change.inserted;
+          const modified =
+            !this.large &&
+            change.deleted > 0 &&
+            change.inserted > 0 &&
+            change.deleted <= 40 &&
+            change.inserted <= 40;
           ranges.push({
             from: start,
             to: start + count,
             kind: side === 0 ? 'deleted' : 'inserted',
+            pairLines: modified
+              ? side === 0
+                ? afterLines.slice(change.line1, change.line1 + change.inserted)
+                : beforeLines.slice(change.line0, change.line0 + change.deleted)
+              : undefined,
           });
         }
       }

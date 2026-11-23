@@ -66,7 +66,7 @@ async fn read_with_limit(
     limit: usize,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
-    let mut chunk = [0; 8192];
+    let mut chunk = vec![0; 8192];
     loop {
         let count = stream.read(&mut chunk).await.map_err(|e| e.to_string())?;
         if count == 0 {
@@ -392,13 +392,16 @@ impl Git {
     }
 
     pub async fn workspace_summary(&self) -> Result<crate::workspace::RepositorySummary, String> {
-        let branch = self.execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None).await?;
+        let (branch, status_bytes) = tokio::try_join!(
+            async { self.execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None).await },
+            async { self.bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"]).await },
+        )?;
         let branch = match branch.code {
             0 => Some(String::from_utf8_lossy(&branch.stdout).trim().to_owned()),
             1 => None,
             _ => { branch.checked()?; unreachable!() },
         };
-        let changes = parse_status(&self.bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"]).await?)?;
+        let changes = parse_status(&status_bytes)?;
         let unique = |predicate: fn(&Change) -> bool| changes.iter().filter(|change| predicate(change)).map(|change| &change.path).collect::<std::collections::HashSet<_>>().len();
         Ok(crate::workspace::RepositorySummary {
             root: self.root_string(), branch,
@@ -409,33 +412,28 @@ impl Git {
     }
 
     pub async fn diagnostics(&self) -> Result<Diagnostics, String> {
-        let status = self.status().await?;
-        let git_dir = self
-            .text(&["rev-parse", "--absolute-git-dir"])
-            .await?
-            .trim()
-            .to_owned();
-        let git_version = self.text(&["--version"]).await?.trim().to_owned();
-        let remote_names = self
-            .text(&["remote"])
-            .await?
+        let (status, git_dir, git_version, remotes_text, worktrees_text, autocrlf, commit_gpgsign) =
+            tokio::try_join!(
+                self.status(),
+                async { self.text(&["rev-parse", "--absolute-git-dir"]).await },
+                async { self.text(&["--version"]).await },
+                async { self.text(&["remote"]).await },
+                async { self.text(&["worktree", "list", "--porcelain"]).await },
+                async { self.execute(&["config", "--get", "core.autocrlf"], None).await },
+                async { self.execute(&["config", "--get", "commit.gpgsign"], None).await },
+            )?;
+        let git_dir = git_dir.trim().to_owned();
+        let git_version = git_version.trim().to_owned();
+        let remote_names = remotes_text
             .lines()
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(str::to_owned)
             .collect();
-        let worktree_count = self
-            .text(&["worktree", "list", "--porcelain"])
-            .await?
+        let worktree_count = worktrees_text
             .lines()
             .filter(|line| line.starts_with("worktree "))
             .count();
-        let autocrlf = self
-            .execute(&["config", "--get", "core.autocrlf"], None)
-            .await?;
-        let commit_gpgsign = self
-            .execute(&["config", "--get", "commit.gpgsign"], None)
-            .await?;
         let lfs = self.execute(&["lfs", "version"], None).await;
         let lfs_available = lfs.as_ref().is_ok_and(|output| output.code == 0);
         let lfs_files = if lfs_available {
@@ -491,13 +489,13 @@ impl Git {
     }
 
     pub async fn repository(&self) -> Result<Repository, String> {
-        let head = self.head().await?;
-        let branch = self
-            .execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None)
-            .await?;
+        let (head, branch, git_dir) = tokio::try_join!(
+            self.head(),
+            async { self.execute(&["symbolic-ref", "--quiet", "--short", "HEAD"], None).await },
+            async { self.text(&["rev-parse", "--absolute-git-dir"]).await },
+        )?;
         let branch =
             (branch.code == 0).then(|| String::from_utf8_lossy(&branch.stdout).trim().to_owned());
-        let git_dir = self.text(&["rev-parse", "--absolute-git-dir"]).await?;
         let dir = Path::new(git_dir.trim());
         let operation = if dir.join("rebase-merge").exists() || dir.join("rebase-apply").exists() {
             "rebase"
@@ -525,20 +523,21 @@ impl Git {
     }
 
     pub async fn status(&self) -> Result<Status, String> {
-        let repository = self.repository().await?;
-        let changes = parse_status(
-            &self
-                .bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])
-                .await?,
+        let (repository, status_bytes, branch_data, stash_data) = tokio::try_join!(
+            self.repository(),
+            async { self.bytes(&["status", "--porcelain=v1", "-z", "--untracked-files=all"]).await },
+            async {
+                self.text(&[
+                    "for-each-ref",
+                    "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)",
+                    "refs/heads",
+                    "refs/remotes",
+                ])
+                .await
+            },
+            async { self.text(&["stash", "list", "-z", "--format=%gd%x00%H%x00%gs"]).await },
         )?;
-        let branch_data = self
-            .text(&[
-                "for-each-ref",
-                "--format=%(refname)%00%(objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)",
-                "refs/heads",
-                "refs/remotes",
-            ])
-            .await?;
+        let changes = parse_status(&status_bytes)?;
         let branches = branch_data
             .lines()
             .filter_map(|line| {
@@ -566,9 +565,6 @@ impl Git {
                 })
             })
             .collect();
-        let stash_data = self
-            .text(&["stash", "list", "-z", "--format=%gd%x00%H%x00%gs"])
-            .await?;
         let parts: Vec<_> = stash_data.split_terminator('\0').collect();
         let stashes = parts
             .chunks_exact(3)
@@ -589,28 +585,29 @@ impl Git {
     pub async fn details(&self, revision: &str) -> Result<CommitDetails, String> {
         validate_hash(revision)?;
         let format = format!("--format={LOG_FORMAT}%b%x00");
-        let bytes = self
-            .bytes(&["show", "--no-patch", &format, revision, "--"])
-            .await?;
+        let (bytes, changes) = tokio::try_join!(
+            async { self.bytes(&["show", "--no-patch", &format, revision, "--"]).await },
+            async {
+                self.bytes(&[
+                    "diff-tree",
+                    "--root",
+                    "--no-commit-id",
+                    "-r",
+                    "-m",
+                    "--first-parent",
+                    "--name-status",
+                    "-z",
+                    "-M",
+                    revision,
+                    "--",
+                ])
+                .await
+            },
+        )?;
         let data = std::str::from_utf8(&bytes).map_err(|_| "Commit message is not UTF-8")?;
         let fields: Vec<_> = data.split('\0').collect();
         let commit = parse_commit(&fields)?;
         let body = fields.get(7).unwrap_or(&"").to_string();
-        let changes = self
-            .bytes(&[
-                "diff-tree",
-                "--root",
-                "--no-commit-id",
-                "-r",
-                "-m",
-                "--first-parent",
-                "--name-status",
-                "-z",
-                "-M",
-                revision,
-                "--",
-            ])
-            .await?;
         Ok(CommitDetails {
             commit,
             body,
@@ -641,16 +638,17 @@ impl Git {
             if let Some(revision) = &request.revision {
                 validate_hash(revision)?;
             }
-            (
-                self.blob_snapshot(Some(&before_revision), old_path, allow_large)
-                    .await?,
-                if let Some(revision) = &request.revision {
-                    self.blob_snapshot(Some(revision), &request.path, allow_large)
-                        .await?
-                } else {
-                    self.worktree_snapshot(&request.path, allow_large).await?
+            tokio::try_join!(
+                self.blob_snapshot(Some(&before_revision), old_path, allow_large),
+                async {
+                    if let Some(revision) = &request.revision {
+                        self.blob_snapshot(Some(revision), &request.path, allow_large)
+                            .await
+                    } else {
+                        self.worktree_snapshot(&request.path, allow_large).await
+                    }
                 },
-            )
+            )?
         } else if let Some(revision) = request.revision {
             validate_hash(&revision)?;
             let ancestry = self
@@ -658,40 +656,44 @@ impl Git {
                 .await?;
             let mut hashes = ancestry.split_whitespace();
             validate_hash(hashes.next().ok_or("Select a commit to view its diff.")?)?;
-            let before = if let Some(parent) = hashes.next() {
+            let parent = hashes.next();
+            if let Some(parent) = parent {
                 validate_hash(parent)?;
-                self.blob_snapshot(Some(parent), old_path, allow_large)
-                    .await?
-            } else {
-                FileSnapshot::new(old_path, None, SnapshotState::Missing, &[])
-            };
-            (
-                before,
-                self.blob_snapshot(Some(&revision), &request.path, allow_large)
-                    .await?,
-            )
-        } else {
-            let before = if matches!(request.area, Some(DiffArea::Unstaged)) {
-                let indexed = self.index_snapshot(&request.path, allow_large).await?;
-                if indexed.state == SnapshotState::Missing && old_path != request.path {
-                    self.index_snapshot(old_path, allow_large).await?
-                } else {
-                    indexed
-                }
-            } else if let Some(head) = self.head().await? {
-                self.blob_snapshot(Some(&head), old_path, allow_large)
-                    .await?
-            } else {
-                FileSnapshot::new(old_path, None, SnapshotState::Missing, &[])
-            };
-            (
-                before,
-                if matches!(request.area, Some(DiffArea::Staged)) {
-                    self.index_snapshot(&request.path, allow_large).await?
-                } else {
-                    self.worktree_snapshot(&request.path, allow_large).await?
+            }
+            tokio::try_join!(
+                async {
+                    if let Some(parent) = parent {
+                        self.blob_snapshot(Some(parent), old_path, allow_large).await
+                    } else {
+                        Ok(FileSnapshot::new(old_path, None, SnapshotState::Missing, &[]))
+                    }
                 },
-            )
+                self.blob_snapshot(Some(&revision), &request.path, allow_large),
+            )?
+        } else {
+            tokio::try_join!(
+                async {
+                    if matches!(request.area, Some(DiffArea::Unstaged)) {
+                        let indexed = self.index_snapshot(&request.path, allow_large).await?;
+                        if indexed.state == SnapshotState::Missing && old_path != request.path {
+                            self.index_snapshot(old_path, allow_large).await
+                        } else {
+                            Ok(indexed)
+                        }
+                    } else if let Some(head) = self.head().await? {
+                        self.blob_snapshot(Some(&head), old_path, allow_large).await
+                    } else {
+                        Ok(FileSnapshot::new(old_path, None, SnapshotState::Missing, &[]))
+                    }
+                },
+                async {
+                    if matches!(request.area, Some(DiffArea::Staged)) {
+                        self.index_snapshot(&request.path, allow_large).await
+                    } else {
+                        self.worktree_snapshot(&request.path, allow_large).await
+                    }
+                },
+            )?
         };
         if before.state == SnapshotState::Encoding || after.state == SnapshotState::Encoding {
             return Err("This file is not UTF-8. Use an external editor to view it.".into());
@@ -732,6 +734,89 @@ impl Git {
             large,
             reason,
         })
+    }
+
+    pub async fn save_worktree_file(
+        &self,
+        path: &str,
+        content: &str,
+        expected: &str,
+    ) -> Result<(), String> {
+        use content::SnapshotState;
+        if content.len() > content::MAX_LARGE_FILE {
+            return Err("文件超过编辑大小限制".into());
+        }
+        let file_path = discard::checked_path(&self.root, path)?;
+        match std::fs::symlink_metadata(&file_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err("符号链接请使用外部工具修改".into());
+            }
+            Ok(metadata) if !metadata.is_file() => {
+                return Err("只能编辑工作区普通文件".into());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let current = self.worktree_snapshot(path, true).await?;
+        let current_normalized = match current.state {
+            SnapshotState::Text => current.text.replace("\r\n", "\n"),
+            SnapshotState::Missing if expected.is_empty() => String::new(),
+            SnapshotState::Missing => {
+                return Err("工作区文件已被删除，请刷新后再试".into());
+            }
+            _ => return Err("此文件不是可编辑的 UTF-8 文本文件".into()),
+        };
+        if current_normalized != expected.replace("\r\n", "\n") {
+            return Err("工作区文件已在外部改变，请刷新后再编辑".into());
+        }
+        let _ = self.local_history_capture(path, "Diff 轻量编辑前备份").await;
+        let raw_crlf = std::fs::read(&file_path)
+            .ok()
+            .is_some_and(|bytes| bytes.windows(2).any(|w| w == b"\r\n"));
+        let use_crlf = raw_crlf
+            || current.text.contains("\r\n")
+            || (!current.text.contains('\n') && expected.contains("\r\n"));
+        let normalized = content.replace("\r\n", "\n");
+        let output = if use_crlf {
+            normalized.replace('\n', "\r\n")
+        } else {
+            normalized
+        };
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        merge::atomic_write(&file_path, output.as_bytes(), None)?;
+        let _ = self.local_history_capture(path, "Diff 轻量编辑保存").await;
+        Ok(())
+    }
+
+    pub fn resolve_worktree_file(&self, path: &str) -> Result<PathBuf, String> {
+        let file_path = discard::checked_path(&self.root, path)?;
+        let metadata = std::fs::symlink_metadata(&file_path)
+            .map_err(|_| "该文件在当前工作区中不存在，无法在外部编辑器中打开".to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("只能打开工作区中的普通文件".into());
+        }
+        Ok(file_path)
+    }
+
+    pub fn resolve_reveal_path(&self, path: &str) -> Result<PathBuf, String> {
+        let file_path = discard::checked_path(&self.root, path)?;
+        if file_path.exists() {
+            return Ok(file_path);
+        }
+        let mut current = file_path.parent();
+        while let Some(dir) = current {
+            if dir.starts_with(&self.root) && dir.exists() {
+                return Ok(dir.to_path_buf());
+            }
+            if dir == self.root {
+                break;
+            }
+            current = dir.parent();
+        }
+        Ok(self.root.clone())
     }
 
     pub async fn stage(&self, paths: Vec<String>, unstage: bool) -> Result<(), String> {

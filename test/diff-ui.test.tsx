@@ -228,3 +228,77 @@ test('file scrolling batches geometry reads and ignores feedback from synchroniz
     render(null, root);
   }
 });
+
+test('worktree diff supports lightweight editing, word highlights, revert and atomic save while historical diffs remain read-only', async () => {
+  const saves: any[] = [];
+  let savedCount = 0;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'save_worktree_file') {
+      saves.push(args);
+      return '';
+    }
+    return {
+      before: 'const count = 1;\nconst stay = true;\n',
+      after: 'const count = 2;\nconst stay = true;\n',
+      binary: false,
+      tooLarge: false,
+    };
+  };
+  try {
+    show(target('history.ts', 'a'.repeat(40)));
+    await waitFor(() => root.querySelectorAll('.cm-editor').length === 2);
+    assert.ok(root.querySelector('.word-removed'));
+    assert.ok(root.querySelector('.word-added'));
+    assert.equal(
+      [...root.querySelectorAll('label')].some((node) => node.textContent?.includes('轻量编辑')),
+      false,
+    );
+
+    render(
+      <DiffView
+        root="C:/fixture"
+        target={{ path: 'working.ts', oldPath: null, revision: null, area: 'unstaged' }}
+        version={0}
+        onSaved={() => {
+          savedCount++;
+        }}
+      />,
+      root,
+    );
+    await waitFor(() =>
+      [...root.querySelectorAll('label')].some((node) => node.textContent?.includes('轻量编辑')),
+    );
+    const editLabel = [...root.querySelectorAll('label')].find((node) =>
+      node.textContent?.includes('轻量编辑'),
+    )!;
+    const toggle = editLabel.querySelector('input')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-save-btn'));
+
+    const rightView = EditorView.findFromDOM(
+      root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement,
+    )!;
+    rightView.dispatch({
+      changes: { from: 0, to: rightView.state.doc.length, insert: 'const count = 3;\nconst stay = true;\n' },
+    });
+    await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+
+    (root.querySelector('.diff-revert-btn') as HTMLButtonElement).click();
+    await waitFor(() => textAfter().includes('const count = 2;'));
+    assert.equal((root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled, true);
+
+    rightView.dispatch({
+      changes: { from: 0, to: rightView.state.doc.length, insert: 'const count = 42;\nconst stay = true;\n' },
+    });
+    await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+    (root.querySelector('.diff-save-btn') as HTMLButtonElement).click();
+    await waitFor(() => saves.length === 1 && savedCount === 1);
+    assert.equal(saves[0].path, 'working.ts');
+    assert.equal(saves[0].content, 'const count = 42;\nconst stay = true;\n');
+    assert.equal(saves[0].expected, 'const count = 2;\nconst stay = true;\n');
+    assert.equal((root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled, true);
+  } finally {
+    render(null, root);
+  }
+});

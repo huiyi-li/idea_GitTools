@@ -7,6 +7,7 @@ export interface MinimapRange {
   to: number;
   kind: 'inserted' | 'deleted' | 'modified' | 'conflict';
   resolved?: boolean;
+  pairLines?: readonly string[];
 }
 
 export const setMinimapRanges = StateEffect.define<readonly MinimapRange[]>();

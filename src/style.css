@@ -787,6 +787,18 @@ input[type='checkbox'] {
 .ref-label.remote {
   color: var(--ref-remote);
 }
+.ref-label.tag {
+  border: 1px solid var(--border-subtle);
+}
+.ref-label.head {
+  font-weight: 600;
+}
+.graph-jump-edge {
+  cursor: pointer;
+}
+.commit-row.merge-commit .commit-subject span:last-child {
+  opacity: 0.85;
+}
 .pagination {
   display: flex;
   gap: 4px;
@@ -1051,11 +1063,39 @@ input[type='checkbox'] {
   align-items: center;
   gap: 4px;
 }
+.diff-nav-tools,
+.diff-edit-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.diff-change-count {
+  font-size: 11px;
+}
+.diff-save-btn,
+.diff-revert-btn {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  border-radius: 3px;
+}
 .line-added {
   background: #4f9c4930;
 }
 .line-removed {
   background: #de6a6630;
+}
+.word-added {
+  background: #4f9c4966;
+  border-radius: 2px;
+}
+.word-removed {
+  background: #de6a6666;
+  border-radius: 2px;
+}
+.branch-dir-group,
+.file-dir-group {
+  padding-left: 8px;
 }
 .empty {
   flex: 1;

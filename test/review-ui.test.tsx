@@ -440,3 +440,98 @@ test('closing during background diff calculation terminates its worker and disca
     assert.equal(jobs.length, 0);
   } finally { render(null, root); Object.defineProperty(globalThis, 'Worker', { configurable: true, value: TestWorker }); }
 });
+
+test('three-pane viewer supports lightweight worktree editing, revert, save and external editor / explorer actions while keeping historical panes read-only', async () => {
+  const state = fixture();
+  const saves: any[] = [];
+  const external: { command: string; args: any }[] = [];
+  const baseBackend = globalThis.testBackend;
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'save_worktree_file') {
+      saves.push(args);
+      state.working(args.content);
+      return '';
+    }
+    if (command === 'open_in_editor' || command === 'reveal_in_explorer') {
+      external.push({ command, args });
+      return '';
+    }
+    return baseBackend(command, args);
+  };
+  let savedCount = 0;
+  render(
+    <Viewer
+      root="C:/fixture"
+      details={details}
+      initialPath="first.ts"
+      version={1}
+      onClose={() => render(null, root)}
+      onSaved={() => {
+        savedCount++;
+      }}
+    />,
+    root,
+  );
+  try {
+    await waitFor(() => root.querySelectorAll('.cm-editor').length === 3);
+    button('外部编辑器').click();
+    button('打开所在目录').click();
+    await waitFor(() => external.length === 2);
+    assert.equal(external[0].command, 'open_in_editor');
+    assert.equal(external[0].args.path, 'first.ts');
+    assert.equal(external[1].command, 'reveal_in_explorer');
+    assert.equal(external[1].args.path, 'first.ts');
+
+    const editToggle = [...root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (input) => input.parentElement?.textContent?.includes('轻量编辑工作区'),
+    )!;
+    editToggle.checked = true;
+    editToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(
+      () =>
+        root.querySelector('.review-current .cm-content')?.getAttribute('contenteditable') === 'true',
+    );
+    assert.equal(
+      root.querySelector('.review-before .cm-content')?.getAttribute('contenteditable'),
+      'false',
+    );
+    assert.equal(
+      root.querySelector('.review-after .cm-content')?.getAttribute('contenteditable'),
+      'false',
+    );
+
+    const currentView = EditorView.findFromDOM(
+      root.querySelector('.review-current .cm-editor') as HTMLElement,
+    )!;
+    currentView.dispatch({
+      changes: { from: 0, to: currentView.state.doc.length, insert: 'edited current\n' },
+    });
+    await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+
+    (root.querySelector('.diff-revert-btn') as HTMLButtonElement).click();
+    await waitFor(
+      () =>
+        !root.querySelector('.review-current .cm-content')?.textContent?.includes('edited') &&
+        (root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled,
+    );
+    assert.equal((root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled, true);
+
+    currentView.dispatch({
+      changes: { from: 0, to: currentView.state.doc.length, insert: 'saved current\n' },
+    });
+    await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+    (root.querySelector('.diff-save-btn') as HTMLButtonElement).click();
+    await waitFor(
+      () =>
+        saves.length === 1 &&
+        savedCount === 1 &&
+        (root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled,
+    );
+    assert.equal(saves[0].path, 'first.ts');
+    assert.equal(saves[0].content, 'saved current\n');
+    assert.equal(saves[0].expected, 'current\n');
+    assert.equal((root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled, true);
+  } finally {
+    render(null, root);
+  }
+});

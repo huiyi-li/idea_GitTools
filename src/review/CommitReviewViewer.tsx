@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { open } from '@tauri-apps/plugin-dialog';
 import { call, type Details } from '../api';
 import { MergeAnalysis } from '../merge/analysis-client';
+import { buildChanges } from '../shared/intellijDiff';
 import { FileIcon, Modal, Split, ToolButton } from '../ui/controls';
 import { ReviewEditors } from './ReviewEditors';
 import { readable, type CommitReview, type ReviewDiffs, type WorktreeSnapshot } from './types';
@@ -36,12 +37,14 @@ export default function CommitReviewViewer({
   initialPath,
   version,
   onClose,
+  onSaved,
 }: {
   root: string;
   details: Details;
   initialPath: string;
   version: number;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
   const [path, setPath] = useState(initialPath);
   const [loaded, setLoaded] = useState<Loaded>();
@@ -139,6 +142,71 @@ export default function CommitReviewViewer({
     setPath(next);
   }
 
+  async function saveCurrentWorktree(content: string): Promise<boolean> {
+    if (!value) return false;
+    const currentFile = value.document.current.file;
+    setError('');
+    try {
+      await call('save_worktree_file', {
+        root,
+        path: currentFile.path,
+        content,
+        expected: currentFile.text,
+      });
+      const updatedFile = {
+        ...currentFile,
+        text: content,
+        fingerprint: `text:${content}`,
+      };
+      const updatedDocument: CommitReview = {
+        ...value.document,
+        current: { ...value.document.current, file: updatedFile },
+      };
+      const afterText = value.document.after.text.replace(/\r\n/g, '\n');
+      const updatedCurrentDiff =
+        readable(value.document.after) && !value.document.after.large && !updatedFile.large
+          ? {
+              before: afterText,
+              after: content,
+              changes: buildChanges(afterText.split('\n'), content.split('\n')),
+            }
+          : value.diffs.current;
+      const updatedEntry: Loaded = {
+        ...value,
+        document: updatedDocument,
+        diffs: { ...value.diffs, current: updatedCurrentDiff },
+      };
+      latest.current = updatedEntry;
+      cache.current.set(key, updatedEntry);
+      setLoaded(updatedEntry);
+      onSaved?.();
+      return true;
+    } catch (e) {
+      setError(String(e));
+      return false;
+    }
+  }
+
+  async function openExternalEditor() {
+    const targetPath = value?.document.current.file.path ?? path;
+    setError('');
+    try {
+      await call('open_in_editor', { root, path: targetPath });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function revealInExplorer() {
+    const targetPath = value?.document.current.file.path ?? path;
+    setError('');
+    try {
+      await call('reveal_in_explorer', { root, path: targetPath });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.key === 'F5') {
@@ -201,6 +269,20 @@ export default function CommitReviewViewer({
         >
           关联当前文件
         </button>
+        <button
+          disabled={busy || !value || value.document.current.file.state === 'missing'}
+          title="在外部编辑器中打开当前工作区文件"
+          onClick={() => void openExternalEditor()}
+        >
+          外部编辑器
+        </button>
+        <button
+          disabled={busy || !value}
+          title="在资源管理器中显示当前工作区文件"
+          onClick={() => void revealInExplorer()}
+        >
+          打开所在目录
+        </button>
         <ToolButton icon="general/close" label="关闭三栏查看器" onClick={onClose} />
       </header>
       {value && value.version !== version && (
@@ -246,7 +328,13 @@ export default function CommitReviewViewer({
               正在读取快照和计算差异…
             </div>
           )}
-          {value && <ReviewEditors document={value.document} diffs={value.diffs} />}
+          {value && (
+            <ReviewEditors
+              document={value.document}
+              diffs={value.diffs}
+              onSaveCurrent={saveCurrentWorktree}
+            />
+          )}
         </section>
       </Split>
     </Modal>

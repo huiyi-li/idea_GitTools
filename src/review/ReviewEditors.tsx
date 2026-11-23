@@ -10,7 +10,15 @@ import {
   type Scope,
 } from './types';
 
-export function ReviewEditors({ document, diffs }: { document: CommitReview; diffs: ReviewDiffs }) {
+export function ReviewEditors({
+  document,
+  diffs,
+  onSaveCurrent,
+}: {
+  document: CommitReview;
+  diffs: ReviewDiffs;
+  onSaveCurrent?: (content: string) => Promise<boolean>;
+}) {
   const before = useRef<HTMLDivElement>(null);
   const after = useRef<HTMLDivElement>(null);
   const current = useRef<HTMLDivElement>(null);
@@ -19,8 +27,42 @@ export function ReviewEditors({ document, diffs }: { document: CommitReview; dif
   const [sync, setSync] = useState(true);
   const [minimap, setMinimap] = useMinimapPreference();
   const [index, setIndex] = useState(-1);
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const baseTextRef = useRef(document.current.file.text.replace(/\r\n/g, '\n'));
+  baseTextRef.current = document.current.file.text.replace(/\r\n/g, '\n');
+  const draftRef = useRef(baseTextRef.current);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const savingRef = useRef(false);
+  savingRef.current = saving;
+  const onSaveRef = useRef(onSaveCurrent);
+  onSaveRef.current = onSaveCurrent;
+  const canEditCurrent = document.current.file.state === 'text' && !!onSaveCurrent;
   const preferences = useRef({ scope, sync, minimap });
   preferences.current = { scope, sync, minimap };
+
+  async function saveCurrentEdit() {
+    if (!onSaveRef.current || !dirtyRef.current || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const ok = await onSaveRef.current(draftRef.current);
+      if (ok) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  function revertCurrentEdit() {
+    if (savingRef.current) return;
+    controller.current?.resetCurrentText();
+  }
 
   useEffect(() => {
     if (!before.current || !after.current || !current.current) return;
@@ -31,8 +73,16 @@ export function ReviewEditors({ document, diffs }: { document: CommitReview; dif
       preferences.current.scope,
       preferences.current.minimap,
       setIndex,
+      (text) => {
+        draftRef.current = text;
+        const nextDirty = text !== baseTextRef.current;
+        dirtyRef.current = nextDirty;
+        setDirty(nextDirty);
+      },
+      () => void saveCurrentEdit(),
     );
     view.setSync(preferences.current.sync);
+    view.setCurrentEditable(editing && canEditCurrent);
     controller.current = view;
     return () => {
       view.destroy();
@@ -41,8 +91,18 @@ export function ReviewEditors({ document, diffs }: { document: CommitReview; dif
   }, [document.before, document.after]);
 
   useEffect(() => {
+    const normalized = document.current.file.text.replace(/\r\n/g, '\n');
+    draftRef.current = normalized;
+    dirtyRef.current = false;
+    setDirty(false);
+    if (!canEditCurrent && editing) setEditing(false);
     controller.current?.updateCurrent(document.current.file, diffs);
-  }, [document.current.file, diffs]);
+    controller.current?.setCurrentEditable(editing && canEditCurrent);
+  }, [document.current.file, diffs, canEditCurrent]);
+
+  useEffect(() => {
+    controller.current?.setCurrentEditable(editing && canEditCurrent);
+  }, [editing, canEditCurrent]);
   useEffect(() => {
     controller.current?.setScope(scope);
   }, [scope]);
@@ -64,7 +124,14 @@ export function ReviewEditors({ document, diffs }: { document: CommitReview; dif
   const renderPane = (pane: Pane) => (
     <section class={'review-code-pane review-' + pane} aria-label={titles[pane]}>
       <header>
-        <strong>{titles[pane]} · 只读</strong>
+        <strong>
+          {titles[pane]} ·{' '}
+          {pane === 'current' && editing && canEditCurrent
+            ? dirty
+              ? '未保存'
+              : '可编辑'
+            : '只读'}
+        </strong>
         <small class="mono">
           {pane === 'before'
             ? document.parent
@@ -145,6 +212,45 @@ export function ReviewEditors({ document, diffs }: { document: CommitReview; dif
           />
           代码缩略图
         </label>
+        {canEditCurrent && (
+          <div class="diff-edit-tools">
+            <label title="直接在右侧当前工作区栏微调代码并按 Ctrl+S 保存">
+              <input
+                type="checkbox"
+                checked={editing}
+                disabled={saving}
+                onChange={(event) => {
+                  const next = event.currentTarget.checked;
+                  setEditing(next);
+                  if (next) setScope('current');
+                }}
+              />
+              轻量编辑工作区
+            </label>
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  class="diff-save-btn"
+                  disabled={!dirty || saving}
+                  title="保存当前工作区修改 · Ctrl+S"
+                  onClick={() => void saveCurrentEdit()}
+                >
+                  {saving ? '保存中…' : '保存修改'}
+                </button>
+                <button
+                  type="button"
+                  class="diff-revert-btn"
+                  disabled={!dirty || saving}
+                  title="放弃当前工作区栏中未保存的修改"
+                  onClick={revertCurrentEdit}
+                >
+                  还原修改
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
       <div class="review-three-panes">
         <Split storageKey="review-before" initial={330} min={150} label="调整修改前栏宽度">

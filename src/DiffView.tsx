@@ -1,22 +1,98 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Compartment, EditorState, Text } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, lineNumbers } from '@codemirror/view';
-import { defaultKeymap } from '@codemirror/commands';
-import { keymap } from '@codemirror/view';
+import { Compartment, EditorState, Text, type Extension } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType, keymap, lineNumbers } from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { LanguageDescription } from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
 import { call, readSaved, save, type BlameLine, type DiffTarget, type FileDiff } from './api';
 import { MergeAnalysis } from './merge/analysis-client';
 import type { PreparedDiff } from './merge/analysis';
+import { syntaxTheme } from './merge/theme';
+import { buildChanges } from './shared/intellijDiff';
+import { ToolButton } from './ui/controls';
 import { useMinimapPreference } from './ui/editor-preferences';
-import { codeMinimap, minimapRanges, type MinimapRange } from './ui/minimap';
+import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from './ui/minimap';
 import { diffLineHighlights } from './ui/diff-highlights';
 
-export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onToggleBlame }: {
+class BlameWidget extends WidgetType {
+  constructor(private readonly line: BlameLine) { super(); }
+  eq(other: BlameWidget) {
+    return (
+      this.line.hash === other.line.hash &&
+      this.line.line === other.line.line &&
+      this.line.author === other.line.author &&
+      this.line.time === other.line.time &&
+      this.line.summary === other.line.summary
+    );
+  }
+  toDOM() {
+    const element = document.createElement('span');
+    element.className = 'cm-inline-blame';
+    element.textContent = `${this.line.author} · ${new Date(this.line.time * 1000).toLocaleDateString('zh-CN')} · ${this.line.summary}`;
+    element.title = `${this.line.hash} · ${this.line.path}`;
+    return element;
+  }
+  ignoreEvent() { return true; }
+}
+
+function buildBlameDecorations(doc: Text, lines: BlameLine[]) {
+  return Decoration.set(
+    lines.flatMap((line) => {
+      const number = line.line;
+      if (number < 1 || number > doc.lines) return [];
+      return [Decoration.widget({ widget: new BlameWidget(line), side: 1 }).range(doc.line(number).to)] as const;
+    }),
+    true,
+  );
+}
+
+function buildRanges(
+  side: 'before' | 'after',
+  changes: PreparedDiff['changes'],
+  beforeLines: string[],
+  afterLines: string[],
+  large?: boolean,
+): MinimapRange[] {
+  return changes.map((change) => {
+    const modified =
+      !large &&
+      change.deleted > 0 &&
+      change.inserted > 0 &&
+      change.deleted <= 40 &&
+      change.inserted <= 40;
+    return {
+      from: side === 'before' ? change.line0 : change.line1,
+      to: side === 'before' ? change.line0 + change.deleted : change.line1 + change.inserted,
+      kind: side === 'before' ? 'deleted' : 'inserted',
+      pairLines: modified
+        ? side === 'before'
+          ? afterLines.slice(change.line1, change.line1 + change.inserted)
+          : beforeLines.slice(change.line0, change.line0 + change.deleted)
+        : undefined,
+    };
+  });
+}
+
+export function DiffEditors({
+  data,
+  path,
+  labels,
+  onLineSelect,
+  blame,
+  showBlame,
+  onToggleBlame,
+  canEdit,
+  onSave,
+}: {
   data: PreparedDiff;
+  path?: string;
   labels?: [string, string];
   onLineSelect?: (line: number, side: 'LEFT' | 'RIGHT') => void;
   blame?: BlameLine[];
   showBlame?: boolean;
   onToggleBlame?: (enabled: boolean) => void;
+  canEdit?: boolean;
+  onSave?: (content: string) => Promise<boolean>;
 }) {
   const selection = useRef(onLineSelect);
   const inlineBlame = showBlame === true;
@@ -25,23 +101,166 @@ export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onTo
   const right = useRef<HTMLDivElement>(null);
   const [sync, setSync] = useState(true);
   const [minimap, setMinimap] = useMinimapPreference();
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [currentChange, setCurrentChange] = useState(0);
+  const [changeCount, setChangeCount] = useState(data.changes.length);
+  const liveChanges = useRef(data.changes);
+  const changeIndexRef = useRef(0);
+  const draftRef = useRef(data.after);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const savingRef = useRef(false);
+  savingRef.current = saving;
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
   const minimapEnabled = useRef(minimap);
   minimapEnabled.current = minimap;
   const minimapMode = useRef(new Compartment());
+  const blameMode = useRef(new Compartment());
+  const languageMode = useRef(new Compartment());
+  const syntaxMode = useRef(new Compartment());
+  const editMode = useRef(new Compartment());
+  const languageSupport = useRef<Extension>([]);
+  const blameLines = useRef(blame ?? []);
+  blameLines.current = inlineBlame ? (blame ?? []) : [];
   const views = useRef<EditorView[]>([]);
+
+  async function saveEdit() {
+    if (!onSaveRef.current || !dirtyRef.current || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const ok = await onSaveRef.current(draftRef.current);
+      if (ok) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  function revertEdit() {
+    const rightView = views.current[1];
+    if (!rightView || savingRef.current) return;
+    rightView.dispatch({
+      changes: { from: 0, to: rightView.state.doc.length, insert: data.after },
+    });
+  }
+
+  function navigateChange(direction: -1 | 1) {
+    const list = liveChanges.current;
+    if (!list.length || views.current.length < 2) return;
+    const next = (changeIndexRef.current + direction + list.length) % list.length;
+    changeIndexRef.current = next;
+    setCurrentChange(next);
+    const change = list[next];
+    const [a, b] = views.current;
+    const lineA = Math.max(1, Math.min(a.state.doc.lines, change.line0 + 1));
+    const lineB = Math.max(1, Math.min(b.state.doc.lines, change.line1 + 1));
+    a.dispatch({
+      effects: EditorView.scrollIntoView(a.state.doc.line(lineA).from, { y: 'center' }),
+    });
+    b.dispatch({
+      effects: EditorView.scrollIntoView(b.state.doc.line(lineB).from, { y: 'center' }),
+    });
+  }
+
   useEffect(() => {
     for (const view of views.current) {
       view.dispatch({ effects: minimapMode.current.reconfigure(minimap && !data.large ? codeMinimap() : []) });
     }
   }, [minimap, data.large]);
+
+  useEffect(() => {
+    let active = true;
+    languageSupport.current = [];
+    if (!path || data.large) {
+      for (const view of views.current) {
+        view.dispatch({ effects: languageMode.current.reconfigure([]) });
+      }
+      return;
+    }
+    const desc = LanguageDescription.matchFilename(languages, path);
+    if (!desc) return;
+    void desc
+      .load()
+      .then((support) => {
+        if (!active) return;
+        languageSupport.current = support;
+        for (const view of views.current) {
+          view.dispatch({ effects: languageMode.current.reconfigure(data.large ? [] : support) });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [path, data.large]);
+
+  useEffect(() => {
+    if (!canEdit && editing) setEditing(false);
+  }, [canEdit, editing]);
+
+  useEffect(() => {
+    const rightView = views.current[1];
+    if (!rightView) return;
+    const allowEdit = Boolean(canEdit && editing);
+    rightView.dispatch({
+      effects: editMode.current.reconfigure(
+        allowEdit
+          ? [
+              EditorState.readOnly.of(false),
+              EditorView.editable.of(true),
+              history(),
+              keymap.of([
+                ...historyKeymap,
+                {
+                  key: 'Mod-s',
+                  run: () => {
+                    void saveEdit();
+                    return true;
+                  },
+                },
+              ]),
+            ]
+          : [EditorState.readOnly.of(true), EditorView.editable.of(false)],
+      ),
+    });
+    if (allowEdit) rightView.focus();
+  }, [canEdit, editing]);
+
+  useEffect(() => {
+    const rightView = views.current[1];
+    if (!rightView) return;
+    const activeLines = inlineBlame ? (blame ?? []) : [];
+    rightView.dispatch({
+      effects: blameMode.current.reconfigure(
+        activeLines.length ? EditorView.decorations.of(buildBlameDecorations(rightView.state.doc, activeLines)) : [],
+      ),
+    });
+  }, [inlineBlame, blame]);
   const synchronized = useRef(sync);
   synchronized.current = sync;
 
   useEffect(() => {
     if (!left.current || !right.current) return;
-    const before = Text.of(data.before.split('\n'));
-    const after = Text.of(data.after.split('\n'));
+    const beforeLines = data.before.split('\n');
+    const afterLines = data.after.split('\n');
+    const before = Text.of(beforeLines);
+    const after = Text.of(afterLines);
     const changes = data.changes;
+    liveChanges.current = changes;
+    changeIndexRef.current = 0;
+    setCurrentChange(0);
+    setChangeCount(changes.length);
+    draftRef.current = data.after;
+    dirtyRef.current = false;
+    setDirty(false);
+    const dark = document.body.classList.contains('ij-dark');
     const theme = EditorView.theme(
       {
         '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg-editor)', color: 'var(--fg)' },
@@ -55,49 +274,43 @@ export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onTo
         '.cm-line': { padding: '0 12px' },
         '&.cm-focused': { outline: 'none' },
       },
-      { dark: document.body.classList.contains('ij-dark') },
+      { dark },
     );
-    class BlameWidget extends WidgetType {
-      constructor(private readonly line: BlameLine) { super(); }
-      toDOM() {
-        const element = document.createElement('span');
-        element.className = 'cm-inline-blame';
-        element.textContent = `${this.line.author} · ${new Date(this.line.time * 1000).toLocaleDateString('zh-CN')} · ${this.line.summary}`;
-        element.title = `${this.line.hash} · ${this.line.path}`;
-        return element;
-      }
-      ignoreEvent() { return true; }
-    }
-    const blameDecorations = (side: 'before' | 'after') => {
-      const lines = side === 'after' ? blame ?? [] : [];
-      return Decoration.set(lines.flatMap((line) => {
-        const number = line.line;
-        if (number < 1 || number > (side === 'after' ? after.lines : before.lines)) return [];
-        return [Decoration.widget({ widget: new BlameWidget(line), side: 1 }).range((side === 'after' ? after : before).line(number).to)] as const;
-      }));
-    };
+    const navKeymap = keymap.of([
+      {
+        key: 'F7',
+        run: () => {
+          navigateChange(1);
+          return true;
+        },
+      },
+      {
+        key: 'Shift-F7',
+        run: () => {
+          navigateChange(-1);
+          return true;
+        },
+      },
+    ]);
     const extensions = [
       lineNumbers(),
       keymap.of(defaultKeymap),
-      EditorState.readOnly.of(true),
-      EditorView.editable.of(false),
+      navKeymap,
       theme,
       minimapMode.current.of(minimapEnabled.current && !data.large ? codeMinimap() : []),
+      languageMode.current.of(data.large ? [] : languageSupport.current),
+      syntaxMode.current.of(syntaxTheme(dark)),
       diffLineHighlights,
     ];
-    const ranges = (side: 'before' | 'after'): MinimapRange[] =>
-      changes.map((change) => ({
-        from: side === 'before' ? change.line0 : change.line1,
-        to: side === 'before' ? change.line0 + change.deleted : change.line1 + change.inserted,
-        kind: side === 'before' ? 'deleted' : 'inserted',
-      }));
+    const allowEdit = Boolean(canEdit && editing);
     const a = new EditorView({
       parent: left.current,
       doc: before,
       extensions: [
         ...extensions,
-        EditorView.decorations.of(blameDecorations('before')),
-        minimapRanges.init(() => ranges('before')),
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        minimapRanges.init(() => buildRanges('before', changes, beforeLines, afterLines, data.large)),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet) {
             selection.current?.(update.state.doc.lineAt(update.state.selection.main.head).number, 'LEFT');
@@ -110,11 +323,56 @@ export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onTo
       doc: after,
       extensions: [
         ...extensions,
-        EditorView.decorations.of(blameDecorations('after')),
-        minimapRanges.init(() => ranges('after')),
+        editMode.current.of(
+          allowEdit
+            ? [
+                EditorState.readOnly.of(false),
+                EditorView.editable.of(true),
+                history(),
+                keymap.of([
+                  ...historyKeymap,
+                  {
+                    key: 'Mod-s',
+                    run: () => {
+                      void saveEdit();
+                      return true;
+                    },
+                  },
+                ]),
+              ]
+            : [EditorState.readOnly.of(true), EditorView.editable.of(false)],
+        ),
+        blameMode.current.of(
+          blameLines.current.length ? EditorView.decorations.of(buildBlameDecorations(after, blameLines.current)) : [],
+        ),
+        minimapRanges.init(() => buildRanges('after', changes, beforeLines, afterLines, data.large)),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet) {
             selection.current?.(update.state.doc.lineAt(update.state.selection.main.head).number, 'RIGHT');
+          }
+          if (update.docChanged) {
+            const text = update.state.doc.toString();
+            draftRef.current = text;
+            const isDirty = text !== data.after;
+            dirtyRef.current = isDirty;
+            setDirty(isDirty);
+            if (!data.large) {
+              const currentBefore = data.before.split('\n');
+              const currentAfter = text.split('\n');
+              const nextChanges = buildChanges(currentBefore, currentAfter);
+              liveChanges.current = nextChanges;
+              setChangeCount(nextChanges.length);
+              a.dispatch({
+                effects: setMinimapRanges.of(
+                  buildRanges('before', nextChanges, currentBefore, currentAfter, data.large),
+                ),
+              });
+              update.view.dispatch({
+                effects: setMinimapRanges.of(
+                  buildRanges('after', nextChanges, currentBefore, currentAfter, data.large),
+                ),
+              });
+            }
           }
         }),
       ],
@@ -193,6 +451,23 @@ export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onTo
     <>
       <div class="diff-labels">
         <span>{labels?.[0] ?? '修改前'}</span>
+        <div class="diff-nav-tools">
+          <ToolButton
+            icon="general/up"
+            label="上一处差异 · Shift+F7"
+            disabled={!changeCount}
+            onClick={() => navigateChange(-1)}
+          />
+          <ToolButton
+            icon="general/down"
+            label="下一处差异 · F7"
+            disabled={!changeCount}
+            onClick={() => navigateChange(1)}
+          />
+          <span class="diff-change-count muted">
+            {changeCount ? `${Math.min(currentChange + 1, changeCount)}/${changeCount} 处差异` : '无差异'}
+          </span>
+        </div>
         <label>
           <input type="checkbox" checked={sync} onChange={(e) => setSync(e.currentTarget.checked)} />
           同步滚动
@@ -210,7 +485,42 @@ export function DiffEditors({ data, labels, onLineSelect, blame, showBlame, onTo
           />
           代码缩略图
         </label>
-        <span>{labels?.[1] ?? '修改后'}</span>
+        {canEdit && (
+          <div class="diff-edit-tools">
+            <label title="直接在右侧工作区视图中微调代码并按 Ctrl+S 保存">
+              <input
+                type="checkbox"
+                checked={editing}
+                disabled={saving}
+                onChange={(event) => setEditing(event.currentTarget.checked)}
+              />
+              轻量编辑
+            </label>
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  class="diff-save-btn"
+                  disabled={!dirty || saving}
+                  title="保存工作区修改 · Ctrl+S"
+                  onClick={() => void saveEdit()}
+                >
+                  {saving ? '保存中…' : '保存修改'}
+                </button>
+                <button
+                  type="button"
+                  class="diff-revert-btn"
+                  disabled={!dirty || saving}
+                  title="放弃当前编辑器中的未保存修改"
+                  onClick={() => revertEdit()}
+                >
+                  还原修改
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        <span>{labels?.[1] ?? '修改后'}{editing ? (dirty ? ' · 未保存' : ' · 可编辑') : ''}</span>
       </div>
       {(data.large || data.simplified) && (
         <div class="message notice-message" role="status">
@@ -258,11 +568,13 @@ export function DiffView({
   target,
   version,
   labels,
+  onSaved,
 }: {
   root: string;
   target: DiffTarget | null;
   version: number;
   labels?: [string, string];
+  onSaved?: () => void;
 }) {
   const key = target
     ? JSON.stringify([root, target.path, target.oldPath, target.revision, target.beforeRevision, target.area])
@@ -278,6 +590,7 @@ export function DiffView({
   const [attempt, setAttempt] = useState(0);
   const [showBlame, setShowBlame] = useState(() => readSaved<boolean>('diff.inlineBlame', false) === true);
   const [blame, setBlame] = useState<BlameLine[]>([]);
+  const selectedLine = useRef<number>(1);
   const allowLarge = allowedKey === key;
   useEffect(
     () => () => {
@@ -386,6 +699,45 @@ export function DiffView({
 
   const cached = target?.revision ? cache.current.get(key) : undefined;
   const data = loaded?.key === key ? loaded : cached?.version === version ? cached : undefined;
+  const canEdit = Boolean(
+    target &&
+      !target.revision &&
+      !target.beforeRevision &&
+      target.area !== 'staged' &&
+      data &&
+      !data.file.binary &&
+      !data.file.tooLarge,
+  );
+  async function handleSaveWorktree(nextContent: string): Promise<boolean> {
+    if (!target || !data) return false;
+    setError(null);
+    try {
+      await call('save_worktree_file', {
+        root,
+        path: target.path,
+        content: nextContent,
+        expected: data.file.after,
+      });
+      const updatedFile: FileDiff = { ...data.file, after: nextContent };
+      const updatedPrepared: PreparedDiff | undefined = data.prepared
+        ? {
+            ...data.prepared,
+            after: nextContent,
+            changes: data.file.large
+              ? data.prepared.changes
+              : buildChanges(data.prepared.before.split('\n'), nextContent.split('\n')),
+          }
+        : undefined;
+      const nextLoaded: LoadedDiff = { ...data, file: updatedFile, prepared: updatedPrepared };
+      latest.current = nextLoaded;
+      setLoaded(nextLoaded);
+      onSaved?.();
+      return true;
+    } catch (e) {
+      setError({ key, message: String(e) });
+      return false;
+    }
+  }
   let content;
   if (!target) content = <div class="empty">选择文件查看差异</div>;
   else if (error?.key === key)
@@ -411,13 +763,19 @@ export function DiffView({
       <DiffEditors
         key={key}
         data={data.prepared}
+        path={target.path}
         labels={labels ?? (
           target?.area === 'staged' ? ['HEAD', '暂存区'] :
           target?.area === 'unstaged' ? ['暂存区', '工作区'] : undefined
         )}
-          blame={blame}
-          showBlame={showBlame}
-          onToggleBlame={setShowBlame}
+        onLineSelect={(line) => {
+          selectedLine.current = line;
+        }}
+        blame={blame}
+        showBlame={showBlame}
+        onToggleBlame={setShowBlame}
+        canEdit={canEdit}
+        onSave={handleSaveWorktree}
       />
     );
 
@@ -435,6 +793,35 @@ export function DiffView({
         )}
         {phase === '正在计算差异…' && (
           <button onClick={() => worker.current?.close()}>取消计算</button>
+        )}
+        <span class="spacer" />
+        {target && (
+          <div class="diff-external-tools">
+            <button
+              type="button"
+              title="在外部编辑器中打开工作区文件（如已安装 VS Code 则定位到当前选中行）"
+              onClick={() =>
+                void call('open_in_editor', {
+                  root,
+                  path: target.path,
+                  line: selectedLine.current,
+                }).catch((e) => setError({ key, message: String(e) }))
+              }
+            >
+              外部编辑器
+            </button>
+            <button
+              type="button"
+              title="在系统资源管理器中定位该文件"
+              onClick={() =>
+                void call('reveal_in_explorer', { root, path: target.path }).catch((e) =>
+                  setError({ key, message: String(e) }),
+                )
+              }
+            >
+              打开所在目录
+            </button>
+          </div>
         )}
         <span class="muted">
           {target?.beforeRevision
