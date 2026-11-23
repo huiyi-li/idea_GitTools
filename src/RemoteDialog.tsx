@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, type Commit } from './api';
 import { Modal } from './ui/controls';
 import { TransportProgress } from './TransportDialog';
@@ -161,14 +161,17 @@ export function TransferDialog({
   root: string;
   action: 'fetch' | 'pull' | 'push';
   onClose: () => void;
-  onChanged: () => Promise<void>;
+  onChanged: (openConflicts?: boolean) => Promise<void>;
 }) {
+  const [mode, setMode] = useState<'fetch' | 'pull' | 'push'>(action);
   const [overview, setOverview] = useState<Overview>();
   const [remote, setRemote] = useState('');
   const [branch, setBranch] = useState('');
   const [setUpstream, setSetUpstream] = useState(true);
   const [prune, setPrune] = useState(true);
   const [rebase, setRebase] = useState(false);
+  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>('ff-only');
+  const [autoClean, setAutoClean] = useState<'shelf' | 'stash' | 'none'>('shelf');
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
   const [noVerify, setNoVerify] = useState(false);
@@ -178,31 +181,40 @@ export function TransferDialog({
   const [id, setId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [pushFailed, setPushFailed] = useState(false);
+  const modeRef = useRef<'fetch' | 'pull' | 'push'>(action);
+  const retryPushRef = useRef(false);
+  const suppressNextDoneCloseRef = useRef(false);
+
+  async function loadOverview() {
+    const value = await call<Overview>('transfer_overview', { root });
+    setOverview(value);
+    const upstreamRemote = value.remotes
+      .filter((entry) => value.upstream.startsWith(entry.name + '/'))
+      .sort((left, right) => right.name.length - left.name.length)[0];
+    setRemote((prev) => prev || upstreamRemote?.name || value.remotes[0]?.name || '');
+    setBranch((prev) =>
+      prev ||
+      (upstreamRemote
+        ? value.upstream.slice(upstreamRemote.name.length + 1)
+        : (value.branch ?? '')),
+    );
+    return value;
+  }
+
   useEffect(() => {
     let current = true;
-    void call<Overview>('transfer_overview', { root })
-      .then((value) => {
-        if (!current) return;
-        setOverview(value);
-        const upstreamRemote = value.remotes
-          .filter((entry) => value.upstream.startsWith(entry.name + '/'))
-          .sort((left, right) => right.name.length - left.name.length)[0];
-        setRemote(upstreamRemote?.name ?? value.remotes[0]?.name ?? '');
-        setBranch(
-          upstreamRemote
-            ? value.upstream.slice(upstreamRemote.name.length + 1)
-            : (value.branch ?? ''),
-        );
-      })
-      .catch((error) => {
-        if (current) setError(String(error));
-      });
+    void loadOverview().catch((error) => {
+      if (current) setError(String(error));
+    });
     return () => {
       current = false;
     };
   }, [root]);
+
   useEffect(() => {
-    if (action !== 'push' || !remote || !branch) return;
+    if (mode !== 'push' || !remote || !branch) return;
     let current = true;
     setConfirm(false);
     void Promise.all([
@@ -223,29 +235,55 @@ export function TransferDialog({
     return () => {
       current = false;
     };
-  }, [root, remote, branch, action]);
-  async function start() {
-    if (!overview || busy) return;
+  }, [root, remote, branch, mode]);
+
+  async function start(
+    overrideAction?: 'fetch' | 'pull' | 'push',
+    overrideStrategy?: 'ff-only' | 'merge' | 'rebase',
+    overrideClean?: 'shelf' | 'stash' | 'none',
+    chainPush = false,
+  ) {
+    if (!overview || (busy && !overrideAction)) return;
+    const currentAction = overrideAction ?? mode;
+    const currentStrategy = overrideStrategy ?? pullStrategy;
+    const currentClean = overrideClean ?? autoClean;
     setBusy(true);
     setError('');
+    setNotice('');
+    setPushFailed(false);
+    retryPushRef.current = chainPush;
+    modeRef.current = currentAction;
+    if (overrideAction) setMode(overrideAction);
+    if (overrideStrategy) {
+      setPullStrategy(overrideStrategy);
+      setRebase(overrideStrategy === 'rebase');
+    }
+    if (overrideClean) setAutoClean(overrideClean);
     try {
+      const latestOverview = overrideAction ? await loadOverview() : overview;
       setId(
         await call<string>('start_transfer', {
           root,
           request: {
-            action,
+            action: currentAction,
             remote,
             branch,
-            expectedHead: overview.head ?? '',
-            expectedBranch: overview.branch ?? '',
+            expectedHead: latestOverview.head ?? '',
+            expectedBranch: latestOverview.branch ?? '',
             setUpstream,
             prune,
-            rebase,
+            rebase: currentStrategy === 'rebase' || rebase,
             force,
             pushTags,
             noVerify,
             expectedRemote: remoteHash,
-            expectedRemoteConfig: overview.remotes.find((entry) => entry.name === remote),
+            expectedRemoteConfig: latestOverview.remotes.find((entry) => entry.name === remote),
+            ...(currentAction === 'pull'
+              ? {
+                  pullStrategy: currentStrategy,
+                  autoClean: currentClean,
+                }
+              : {}),
           },
         }),
       );
@@ -255,8 +293,8 @@ export function TransferDialog({
     }
   }
   return (
-    <Modal title={action} busy={busy} onClose={onClose} class="transport-dialog">
-      <h2>{action === 'push' ? '推送提交' : action === 'pull' ? '拉取更新' : '获取远程更新'}</h2>
+    <Modal title={mode} busy={busy} onClose={onClose} class="transport-dialog">
+      <h2>{mode === 'push' ? '推送提交' : mode === 'pull' ? '更新项目 · 拉取更新 (Ctrl+T)' : '获取远程更新'}</h2>
       <form
         class="transport-form"
         onSubmit={(event) => {
@@ -283,7 +321,7 @@ export function TransferDialog({
           </select>
         </label>
         {!overview?.remotes.length && overview && <p>请先从主工具栏“管理远程仓库”添加 Remote。</p>}
-        {action === 'fetch' && (
+        {mode === 'fetch' && (
           <label>
             <input
               type="checkbox"
@@ -294,7 +332,7 @@ export function TransferDialog({
             清理远程已删除的分支引用
           </label>
         )}
-        {action !== 'fetch' && (
+        {mode !== 'fetch' && (
           <label>
             目标分支
             <input
@@ -306,7 +344,7 @@ export function TransferDialog({
             />
           </label>
         )}
-        {action === 'push' && (
+        {mode === 'push' && (
           <>
             <label>
               <input
@@ -358,21 +396,83 @@ export function TransferDialog({
             </ul>
           </>
         )}
-        {action === 'pull' && (
-          <label>
-            <input
-              type="checkbox"
-              checked={rebase}
-              disabled={busy}
-              onChange={(event) => setRebase(event.currentTarget.checked)}
-            />
-            通过 Rebase 拉取（默认仅快进）
-          </label>
+        {mode === 'pull' && (
+          <>
+            <label>
+              拉取整合策略
+              <select
+                aria-label="拉取整合策略"
+                value={pullStrategy}
+                disabled={busy}
+                onChange={(event) => {
+                  const next = event.currentTarget.value as 'ff-only' | 'merge' | 'rebase';
+                  setPullStrategy(next);
+                  setRebase(next === 'rebase');
+                }}
+              >
+                <option value="ff-only">仅快进 (--ff-only)</option>
+                <option value="rebase">变基整合 (--rebase)</option>
+                <option value="merge">合并远程分支 (--no-rebase / Merge)</option>
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={rebase}
+                disabled={busy}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setRebase(checked);
+                  setPullStrategy(checked ? 'rebase' : 'ff-only');
+                }}
+              />
+              通过 Rebase 拉取（默认仅快进）
+            </label>
+            <label>
+              脏工作区自动暂存与恢复
+              <select
+                aria-label="脏工作区自动暂存方式"
+                value={autoClean}
+                disabled={busy}
+                onChange={(event) =>
+                  setAutoClean(event.currentTarget.value as 'shelf' | 'stash' | 'none')
+                }
+              >
+                <option value="shelf">自动 Shelve 并在更新后恢复（推荐 · 独立 Patch + Local History 打标）</option>
+                <option value="stash">自动 Git Stash 并在更新后弹出（+ Local History 打标）</option>
+                <option value="none">不自动暂存（要求工作区干净）</option>
+              </select>
+            </label>
+          </>
+        )}
+        {notice && (
+          <p role="status" class="muted">
+            {notice}
+          </p>
         )}
         {error && (
           <p role="alert" class="error-text">
             {error}
           </p>
+        )}
+        {pushFailed && !force && (
+          <div class="modal-actions" aria-label="推送被拒绝快捷处理">
+            <span>推送失败（远程可能包含新提交），可一键更新并自动重推：</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start('pull', 'rebase', 'shelf', true)}
+            >
+              拉取并重新推送 (Rebase + Auto-Shelf)
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void start('pull', 'merge', 'shelf', true)}
+            >
+              拉取并重新推送 (Merge + Auto-Shelf)
+            </button>
+          </div>
         )}
         <div class="modal-actions">
           <button type="button" disabled={busy} onClick={onClose}>
@@ -382,11 +482,11 @@ export function TransferDialog({
             disabled={
               busy ||
               !remote ||
-              (action !== 'fetch' && !branch) ||
+              (mode !== 'fetch' && !branch) ||
               (force && (!confirm || !remoteHash))
             }
           >
-            {action}
+            {mode}
           </button>
         </div>
       </form>
@@ -394,8 +494,40 @@ export function TransferDialog({
         <TransportProgress
           id={id}
           onIdle={(idle) => setBusy(!idle)}
-          onFinished={onChanged}
-          onDone={onClose}
+          onFinished={async (state) => {
+            const finishedMode = modeRef.current;
+            let hasConflicts = false;
+            if (finishedMode === 'pull') {
+              try {
+                const finish = await call<{
+                  restored: boolean;
+                  conflicts: boolean;
+                  message: string;
+                }>('finish_update_project', { root });
+                if (finish?.message) setNotice(finish.message);
+                hasConflicts = !!finish?.conflicts;
+              } catch {
+                // Backend or mock without finish_update_project
+              }
+            }
+            if (finishedMode === 'push' && state === 'error') {
+              setPushFailed(true);
+            }
+            await onChanged(hasConflicts);
+            if (finishedMode === 'pull' && retryPushRef.current && state === 'done' && !hasConflicts) {
+              retryPushRef.current = false;
+              suppressNextDoneCloseRef.current = true;
+              setBusy(false);
+              await start('push');
+            }
+          }}
+          onDone={() => {
+            if (suppressNextDoneCloseRef.current) {
+              suppressNextDoneCloseRef.current = false;
+              return;
+            }
+            onClose();
+          }}
         />
       )}
     </Modal>

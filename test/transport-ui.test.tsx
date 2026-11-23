@@ -997,3 +997,63 @@ test('independent patch-based Shelf supports partial file unshelve, recycle bin 
     render(null, host);
   }
 });
+
+test('push rejection offers one-click Update Project (Auto-Shelf + Rebase) and retries push automatically', async () => {
+  const transfers: any[] = [];
+  let finishCalled = 0;
+  let closed = 0;
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    if (command === 'transfer_overview') {
+      return { remotes: [remote], branch: 'main', head, upstream: 'origin/main' };
+    }
+    if (command === 'repository_status') return status;
+    if (command === 'outgoing_commits') return [commit];
+    if (command === 'start_transfer') {
+      transfers.push(args.request);
+      return `job-${transfers.length}`;
+    }
+    if (command === 'transport_progress') {
+      // First push fails (rejected), pull succeeds, retried push succeeds
+      const state = args.id === 'job-1' ? 'error' : 'done';
+      return {
+        id: args.id,
+        state,
+        directory: 'C:/repo',
+        lines: state === 'error' ? ['! [rejected] main -> main (fetch first)'] : ['ok'],
+        prompt: null,
+        error: state === 'error' ? 'non-fast-forward' : '',
+      };
+    }
+    if (command === 'finish_update_project') {
+      finishCalled++;
+      return { restored: true, conflicts: false, message: '项目已更新并自动恢复更新前的 Shelf 修改。' };
+    }
+    throw Error(command);
+  };
+  render(
+    <TransferDialog
+      root="C:/repo"
+      action="push"
+      onClose={() => {
+        closed++;
+      }}
+      onChanged={async () => {}}
+    />,
+    host,
+  );
+  try {
+    await waitFor(() => host.textContent?.includes('commit'));
+    submit();
+    await waitFor(() => host.querySelector('[aria-label="推送被拒绝快捷处理"]'));
+    button('拉取并重新推送 (Rebase + Auto-Shelf)').click();
+    await waitFor(() => transfers.length === 3 && closed === 1);
+    assert.equal(transfers[0].action, 'push');
+    assert.equal(transfers[1].action, 'pull');
+    assert.equal(transfers[1].pullStrategy, 'rebase');
+    assert.equal(transfers[1].autoClean, 'shelf');
+    assert.equal(transfers[2].action, 'push');
+    assert.equal(finishCalled, 1);
+  } finally {
+    render(null, host);
+  }
+});

@@ -978,6 +978,10 @@ export function App() {
         event.preventDefault();
         document.getElementById('text-filter')?.focus();
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't' && root && !busy) {
+        event.preventDefault();
+        setTransfer('pull');
+      }
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && view === 'changes' && message.trim()) {
         event.preventDefault();
         void commit();
@@ -1094,7 +1098,7 @@ export function App() {
           {(['fetch', 'pull', 'push'] as const).map((action) => (
             <ToolButton
               icon={action === 'fetch' ? 'vcs/fetch' : action === 'pull' ? 'vcs/update' : 'vcs/push'}
-              label={action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull · 仅快进或 Rebase' : 'Push'}
+              label={action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull · 更新项目 (Ctrl+T)' : 'Push'}
               disabled={!root || !!busy}
               key={action}
               onClick={() => setTransfer(action)}
@@ -1692,7 +1696,7 @@ export function App() {
       {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
       {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} />}
-      {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={() => refresh(root, true)} />}
+      {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={(openConflicts) => refresh(root, openConflicts ?? true)} />}
 
       {mergePath !== null && (
         <Suspense fallback={<div class="merge-manager empty">正在加载合并编辑器…</div>}>

@@ -873,6 +873,16 @@ async fn start_transfer(
 }
 
 #[tauri::command]
+async fn finish_update_project(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<git::remotes::UpdateFinishResult, String> {
+    active(&*state.0.lock().await, &root)?
+        .finish_update_project()
+        .await
+}
+
+#[tauri::command]
 async fn repository_management(
     root: String,
     state: State<'_, AppState>,
@@ -1227,6 +1237,7 @@ pub fn run() {
             edit_remote,
             outgoing_commits,
             start_transfer,
+            finish_update_project,
             repository_management,
             edit_ref,
             edit_stash,

@@ -39,6 +39,25 @@ pub(crate) struct TransferRequest {
     pub expected_remote: Option<String>,
     #[serde(default)]
     pub expected_remote_config: Option<Remote>,
+    #[serde(default)]
+    pub pull_strategy: Option<String>,
+    #[serde(default)]
+    pub auto_clean: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+enum PendingUpdateRestore {
+    Shelf { id: String },
+    Stash { hash: String, reference: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateFinishResult {
+    pub restored: bool,
+    pub conflicts: bool,
+    pub message: String,
 }
 
 fn default_prune() -> bool {
@@ -259,17 +278,60 @@ impl Git {
                 ));
             }
             "pull" => {
-                if repository.operation != "none" || !self.status().await?.changes.is_empty() {
+                if repository.operation != "none" {
                     return Err("请先处理当前 Git 操作并保存本地修改".into());
                 }
+                let status = self.status().await?;
+                for change in &status.changes {
+                    let _ = self.local_history_capture(&change.path, "Before Update").await;
+                }
+                let pending_path = self.pending_update_path().await?;
+                let _ = std::fs::remove_file(&pending_path);
+                if !status.changes.is_empty() {
+                    match request.auto_clean.as_deref().unwrap_or("none") {
+                        "shelf" => {
+                            let entry = self
+                                .shelf_save("Before Update (Auto-Shelf)", Vec::new(), true)
+                                .await?;
+                            let pending = PendingUpdateRestore::Shelf { id: entry.id };
+                            if let Some(parent) = pending_path.parent() {
+                                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                            }
+                            let bytes =
+                                serde_json::to_vec_pretty(&pending).map_err(|e| e.to_string())?;
+                            super::merge::atomic_write(&pending_path, &bytes, None)?;
+                        }
+                        "stash" => {
+                            self.save_stash("Before Update (Auto-Stash)").await?;
+                            if let Some(top) = self.status().await?.stashes.first() {
+                                let pending = PendingUpdateRestore::Stash {
+                                    hash: top.hash.clone(),
+                                    reference: top.reference.clone(),
+                                };
+                                if let Some(parent) = pending_path.parent() {
+                                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                                }
+                                let bytes = serde_json::to_vec_pretty(&pending)
+                                    .map_err(|e| e.to_string())?;
+                                super::merge::atomic_write(&pending_path, &bytes, None)?;
+                            }
+                        }
+                        _ => {
+                            return Err("请先处理当前 Git 操作并保存本地修改".into());
+                        }
+                    }
+                }
+                let strategy_arg = match request.pull_strategy.as_deref() {
+                    Some("merge") => "--no-rebase",
+                    Some("rebase") => "--rebase",
+                    Some("ff-only") => "--ff-only",
+                    _ if request.rebase => "--rebase",
+                    _ => "--ff-only",
+                };
                 command.args([
                     "pull",
                     "--progress",
-                    if request.rebase {
-                        "--rebase"
-                    } else {
-                        "--ff-only"
-                    },
+                    strategy_arg,
                     "--",
                     &request.remote,
                     &request.branch,
@@ -278,6 +340,85 @@ impl Git {
             _ => return Err("未知 Git 传输操作".into()),
         }
         Ok(command)
+    }
+
+    async fn pending_update_path(&self) -> Result<std::path::PathBuf, String> {
+        let dir = self
+            .text(&["rev-parse", "--git-path", "ideagittool-shelf"])
+            .await?;
+        Ok(self.root.join(dir.trim()).join("pending-update.json"))
+    }
+
+    pub(crate) async fn finish_update_project(&self) -> Result<UpdateFinishResult, String> {
+        let pending_path = self.pending_update_path().await?;
+        let status = self.status().await?;
+        let pull_conflicts =
+            status.repository.operation != "none" || status.changes.iter().any(|c| c.conflict);
+        let pending_bytes = match std::fs::read(&pending_path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.to_string()),
+        };
+        let Some(bytes) = pending_bytes else {
+            return Ok(UpdateFinishResult {
+                restored: false,
+                conflicts: pull_conflicts,
+                message: if pull_conflicts {
+                    "拉取更新存在合并冲突，请先解决冲突。".into()
+                } else {
+                    "项目已更新".into()
+                },
+            });
+        };
+        let _ = std::fs::remove_file(&pending_path);
+        let pending: PendingUpdateRestore =
+            serde_json::from_slice(&bytes).map_err(|e| format!("读取更新恢复状态失败。{e}"))?;
+        if pull_conflicts {
+            return Ok(UpdateFinishResult {
+                restored: false,
+                conflicts: true,
+                message: "拉取更新产生冲突，更新前自动暂存的本地修改已安全保留在 Shelf / Stash 中，请先解决合并冲突。".into(),
+            });
+        }
+        match pending {
+            PendingUpdateRestore::Shelf { id } => {
+                let res = self.shelf_apply(&id, Vec::new(), true).await?;
+                Ok(UpdateFinishResult {
+                    restored: true,
+                    conflicts: res.conflicts,
+                    message: if res.conflicts {
+                        "项目已拉取，自动恢复 Shelf 修改时产生冲突，已打开三栏冲突解决器。".into()
+                    } else {
+                        "项目已更新并自动恢复更新前的 Shelf 修改。".into()
+                    },
+                })
+            }
+            PendingUpdateRestore::Stash { hash, reference } => {
+                let _ = self
+                    .edit_stash(super::management::StashEdit {
+                        action: "pop".into(),
+                        hash,
+                        reference,
+                        message: String::new(),
+                        keep_index: false,
+                        include_untracked: false,
+                        paths: Vec::new(),
+                    })
+                    .await;
+                let after = self.status().await?;
+                let stash_conflicts = after.repository.operation != "none"
+                    || after.changes.iter().any(|c| c.conflict);
+                Ok(UpdateFinishResult {
+                    restored: true,
+                    conflicts: stash_conflicts,
+                    message: if stash_conflicts {
+                        "项目已拉取，自动恢复 Stash 修改时产生冲突，已打开三栏冲突解决器。".into()
+                    } else {
+                        "项目已更新并自动恢复更新前的 Stash 修改。".into()
+                    },
+                })
+            }
+        }
     }
 
     pub(crate) async fn outgoing(&self, remote: &str, branch: &str) -> Result<Vec<Commit>, String> {
@@ -387,6 +528,8 @@ mod tests {
             prune: true,
             expected_remote: None,
             expected_remote_config: Some(overview.remotes[0].clone()),
+            pull_strategy: None,
+            auto_clean: None,
         };
         let fetch = git
             .transfer_command(TransferRequest {
@@ -403,6 +546,8 @@ mod tests {
                 prune: false,
                 expected_remote: None,
                 expected_remote_config: request.expected_remote_config.clone(),
+                pull_strategy: None,
+                auto_clean: None,
             })
             .await
             .unwrap();
@@ -425,5 +570,69 @@ mod tests {
         force.force = true;
         force.expected_remote = Some("a".repeat(40));
         assert!(git.transfer_command(force).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_project_captures_local_history_auto_shelves_dirty_worktree_and_restores() {
+        let directory = fixture();
+        std::fs::write(directory.path().join("file.txt"), "base\n").unwrap();
+        run(directory.path(), &["add", "."]);
+        run(directory.path(), &["commit", "-m", "initial"]);
+
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "--bare"]);
+        run(
+            directory.path(),
+            &["remote", "add", "origin", &git_path(remote.path())],
+        );
+        run(directory.path(), &["push", "-u", "origin", "main"]);
+
+        // Make a dirty local edit + untracked file
+        std::fs::write(directory.path().join("file.txt"), "dirty local edit\n").unwrap();
+        std::fs::write(directory.path().join("notes.txt"), "untracked note\n").unwrap();
+
+        let git = Git::open(directory.path().to_str().unwrap(), None)
+            .await
+            .unwrap();
+        let overview = git.transfer_overview().await.unwrap();
+        let pull_req = TransferRequest {
+            action: "pull".into(),
+            remote: "origin".into(),
+            branch: "main".into(),
+            expected_head: overview.head.unwrap(),
+            expected_branch: "main".into(),
+            set_upstream: false,
+            rebase: true,
+            force: false,
+            push_tags: false,
+            no_verify: false,
+            prune: true,
+            expected_remote: None,
+            expected_remote_config: Some(overview.remotes[0].clone()),
+            pull_strategy: Some("rebase".into()),
+            auto_clean: Some("shelf".into()),
+        };
+
+        let mut cmd = git.transfer_command(pull_req).await.unwrap();
+        // Worktree was cleaned by Auto-Shelf before running git pull
+        assert!(git.status().await.unwrap().changes.is_empty());
+        assert!(cmd.output().await.unwrap().status.success());
+
+        // Local history captured "Before Update"
+        let lh = git.local_history_list("file.txt").await.unwrap();
+        assert!(lh.iter().any(|e| e.reason == "Before Update"));
+
+        // Finish update project automatically unshelves both tracked and untracked changes
+        let finish = git.finish_update_project().await.unwrap();
+        assert!(finish.restored);
+        assert!(!finish.conflicts);
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("file.txt")).unwrap(),
+            "dirty local edit\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("notes.txt")).unwrap(),
+            "untracked note\n"
+        );
     }
 }
