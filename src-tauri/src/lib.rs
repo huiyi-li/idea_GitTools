@@ -569,6 +569,129 @@ async fn apply_stash(root: String, hash: String, state: State<'_, AppState>) -> 
 }
 
 #[tauri::command]
+async fn shelf_list(
+    root: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<git::shelf::ShelfEntry>, String> {
+    active(&*state.0.lock().await, &root)?.shelf_list().await
+}
+
+#[tauri::command]
+async fn shelf_save(
+    root: String,
+    name: String,
+    paths: Option<Vec<String>>,
+    rollback: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<git::shelf::ShelfEntry, String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_save(&name, paths.unwrap_or_default(), rollback.unwrap_or(true))
+        .await
+}
+
+#[tauri::command]
+async fn shelf_apply(
+    root: String,
+    id: String,
+    paths: Option<Vec<String>>,
+    remove_applied: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<git::shelf::ShelfApplyResult, String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_apply(&id, paths.unwrap_or_default(), remove_applied.unwrap_or(true))
+        .await
+}
+
+#[tauri::command]
+async fn shelf_rename(
+    root: String,
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_rename(&id, &name)
+        .await
+}
+
+#[tauri::command]
+async fn shelf_restore(
+    root: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_restore(&id)
+        .await
+}
+
+#[tauri::command]
+async fn shelf_delete(
+    root: String,
+    id: String,
+    permanent: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_delete(&id, permanent.unwrap_or(false))
+        .await
+}
+
+#[tauri::command]
+async fn shelf_clean_deleted(root: String, state: State<'_, AppState>) -> Result<(), String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_clean_deleted()
+        .await
+}
+
+#[tauri::command]
+async fn shelf_export_patch(
+    root: String,
+    id: String,
+    paths: Option<Vec<String>>,
+    destination: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_export_patch(&id, paths.unwrap_or_default(), destination)
+        .await
+}
+
+#[tauri::command]
+async fn shelf_import_patch(
+    root: String,
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<git::shelf::ShelfEntry, String> {
+    active(&*state.0.lock().await, &root)?
+        .shelf_import_patch(&source_path)
+        .await
+}
+
+#[tauri::command]
+async fn create_worktree_patch(
+    root: String,
+    paths: Option<Vec<String>>,
+    destination: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .create_worktree_patch(paths.unwrap_or_default(), destination)
+        .await
+}
+
+#[tauri::command]
+async fn apply_worktree_patch(
+    root: String,
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<git::shelf::ShelfApplyResult, String> {
+    active(&*state.0.lock().await, &root)?
+        .apply_worktree_patch(&source_path)
+        .await
+}
+
+#[tauri::command]
 async fn compare_branch(
     root: String,
     branch: String,
@@ -1172,6 +1295,17 @@ pub fn run() {
             remote_action,
             save_stash,
             apply_stash,
+            shelf_list,
+            shelf_save,
+            shelf_apply,
+            shelf_rename,
+            shelf_restore,
+            shelf_delete,
+            shelf_clean_deleted,
+            shelf_export_patch,
+            shelf_import_patch,
+            create_worktree_patch,
+            apply_worktree_patch,
             compare_branch,
             start_history,
             preview_navigation,

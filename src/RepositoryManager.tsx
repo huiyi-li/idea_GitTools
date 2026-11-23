@@ -1,8 +1,27 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { call, type Status } from './api';
 import { Modal } from './ui/controls';
-import { DiffView } from './DiffView';
+import { DiffEditors, DiffView } from './DiffView';
+import { buildChanges } from './shared/intellijDiff';
 import { TransportProgress } from './TransportDialog';
+
+export interface ShelfFile {
+  path: string;
+  oldPath?: string | null;
+  status: string;
+  before: string;
+  after: string;
+  binary: boolean;
+}
+
+export interface ShelfEntry {
+  id: string;
+  name: string;
+  timestamp: number;
+  deleted: boolean;
+  files: ShelfFile[];
+}
 
 interface Tag {
   name: string;
@@ -63,11 +82,40 @@ export function RepositoryManager({
   const [job, setJob] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const stashTab = tab === 'stashes' || tab === 'shelves';
-  const visibleStashes = data?.status.stashes.filter((item) => tab === 'shelves' ? item.message.startsWith('Shelf: ') : !item.message.startsWith('Shelf: ')) ?? [];
+  const [shelves, setShelves] = useState<ShelfEntry[]>([]);
+  const [selectedShelfId, setSelectedShelfId] = useState('');
+  const [selectedShelfPaths, setSelectedShelfPaths] = useState<string[]>([]);
+  const [previewShelfFile, setPreviewShelfFile] = useState<ShelfFile | null>(null);
+  const [removeAppliedShelf, setRemoveAppliedShelf] = useState(true);
+  const [shelfRollback, setShelfRollback] = useState(true);
+  const [showDeletedShelves, setShowDeletedShelves] = useState(false);
+  const [shelfRenameText, setShelfRenameText] = useState('');
+  const stashTab = tab === 'stashes';
+  const visibleStashes = data?.status.stashes ?? [];
+  const visibleShelves = shelves.filter((item) => (showDeletedShelves ? item.deleted : !item.deleted));
+  const selectedShelf = visibleShelves.find((item) => item.id === selectedShelfId);
+  const preparedShelfDiff = useMemo(() => {
+    if (!previewShelfFile || previewShelfFile.binary) return undefined;
+    const before = (previewShelfFile.before ?? '').replace(/\r\n/g, '\n');
+    const after = (previewShelfFile.after ?? '').replace(/\r\n/g, '\n');
+    return {
+      before,
+      after,
+      changes: buildChanges(before.split('\n'), after.split('\n')),
+    };
+  }, [previewShelfFile]);
+
   async function load() {
     const next = await call<Management>('repository_management', { root });
     setData(next);
+    if (tab === 'shelves') {
+      try {
+        const shelfEntries = await call<ShelfEntry[]>('shelf_list', { root });
+        if (Array.isArray(shelfEntries)) setShelves(shelfEntries);
+      } catch {
+        setShelves([]);
+      }
+    }
     setRevision(previous => previous || initialRevision || next.status.repository.head || '');
     setRemote((previous) => previous || next.remotes[0]?.name || '');
     setClearConfirm(false);
@@ -79,7 +127,7 @@ export function RepositoryManager({
   }
   useEffect(() => {
     void load().catch((error) => setError(String(error)));
-  }, [root]);
+  }, [root, tab]);
   useEffect(() => {
     setSelected(stashTab ? initialStash?.reference ?? '' : '');
     setSelectedStashHash(stashTab ? initialStash?.hash ?? '' : '');
@@ -93,6 +141,10 @@ export function RepositoryManager({
     setMessage('');
     setFile(null);
     setFiles([]);
+    setSelectedShelfId('');
+    setSelectedShelfPaths([]);
+    setPreviewShelfFile(null);
+    setShelfRenameText('');
   }, [tab]);
   useEffect(() => {
     setFile(null);
@@ -442,10 +494,362 @@ export function RepositoryManager({
           </button>
         </div>
       )}
+      {tab === 'shelves' && (
+        <div class="transport-form">
+          <div class="modal-actions">
+            <label>
+              <input
+                type="checkbox"
+                checked={showDeletedShelves}
+                disabled={busy}
+                onChange={(event) => {
+                  setShowDeletedShelves(event.currentTarget.checked);
+                  setSelectedShelfId('');
+                  setSelectedShelfPaths([]);
+                  setPreviewShelfFile(null);
+                }}
+              />
+              显示已恢复／回收站 Shelf（{shelves.filter((s) => s.deleted).length}）
+            </label>
+            {showDeletedShelves && shelves.some((s) => s.deleted) && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void mutate('shelf_clean_deleted', {})}
+              >
+                清空回收站
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void (async () => {
+                  try {
+                    const picked = await open({
+                      multiple: false,
+                      directory: false,
+                      title: '导入 Patch 文件到 Shelf',
+                      filters: [{ name: 'Patch', extensions: ['patch', 'diff'] }],
+                    });
+                    if (typeof picked === 'string' && picked) {
+                      setBusy(true);
+                      setError('');
+                      await call('shelf_import_patch', { root, sourcePath: picked });
+                      await load();
+                    }
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                })()
+              }
+            >
+              导入 Patch 到 Shelf…
+            </button>
+          </div>
+          <label>
+            {showDeletedShelves ? '回收站中的 Shelf' : '活动 Shelf'}
+            <select
+              aria-label="选择 Shelf"
+              disabled={busy}
+              value={selectedShelf?.id ?? ''}
+              onChange={(event) => {
+                const id = event.currentTarget.value;
+                setSelectedShelfId(id);
+                const found = visibleShelves.find((s) => s.id === id);
+                setSelectedShelfPaths([]);
+                setPreviewShelfFile(found?.files[0] ?? null);
+                setShelfRenameText(found?.name ?? '');
+                setConfirm(false);
+              }}
+            >
+              <option value="">选择 Shelf</option>
+              {visibleShelves.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {item.files.length} 个文件 · {new Date(item.timestamp).toLocaleString('zh-CN')}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedShelf && (
+            <>
+              <div class="navigation-files" aria-label="Shelf 文件列表">
+                {selectedShelf.files.map((item) => (
+                  <div class="modal-actions" key={item.path}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedShelfPaths.includes(item.path)}
+                        disabled={busy}
+                        onChange={(event) =>
+                          setSelectedShelfPaths(
+                            event.currentTarget.checked
+                              ? [...selectedShelfPaths, item.path]
+                              : selectedShelfPaths.filter((p) => p !== item.path),
+                          )
+                        }
+                      />
+                      [{item.status}] {item.path}
+                      {item.oldPath ? `（自 ${item.oldPath}）` : ''}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-pressed={previewShelfFile?.path === item.path}
+                      onClick={() => setPreviewShelfFile(item)}
+                    >
+                      查看差异
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {previewShelfFile && (
+                <div style={{ height: 280 }}>
+                  {previewShelfFile.binary ? (
+                    <div class="empty">二进制文件补丁（{previewShelfFile.path}）</div>
+                  ) : (
+                    preparedShelfDiff && (
+                      <DiffEditors
+                        key={`${selectedShelf.id}-${previewShelfFile.path}`}
+                        data={preparedShelfDiff}
+                        path={previewShelfFile.path}
+                        labels={['Shelve 基准', `Shelf · ${selectedShelf.name}`]}
+                      />
+                    )
+                  )}
+                </div>
+              )}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={removeAppliedShelf}
+                  disabled={busy}
+                  onChange={(event) => setRemoveAppliedShelf(event.currentTarget.checked)}
+                />
+                恢复后将已应用文件移入回收站（Uncheck 则保留在活动列表）
+              </label>
+              <div class="modal-actions">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void (async () => {
+                      setBusy(true);
+                      setError('');
+                      try {
+                        const res = await call<{ conflicts: boolean }>('shelf_apply', {
+                          root,
+                          id: selectedShelf.id,
+                          paths: selectedShelfPaths,
+                          removeApplied: removeAppliedShelf,
+                        });
+                        setSelectedShelfPaths([]);
+                        await load();
+                        await onChanged(res?.conflicts);
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })()
+                  }
+                >
+                  {selectedShelfPaths.length
+                    ? `Unshelve 选中的 ${selectedShelfPaths.length} 个文件`
+                    : 'Unshelve 全部文件'}
+                </button>
+                {selectedShelf.deleted && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void (async () => {
+                        setBusy(true);
+                        setError('');
+                        try {
+                          await call('shelf_restore', { root, id: selectedShelf.id });
+                          await load();
+                        } catch (e) {
+                          setError(String(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      })()
+                    }
+                  >
+                    还原到活动列表
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        const dest = await saveDialog({
+                          title: '导出 Shelf 为 Patch',
+                          defaultPath: `${selectedShelf.name.replace(/[\\/:*?"<>|\r\n]+/g, '-') || 'shelf'}.patch`,
+                          filters: [{ name: 'Patch', extensions: ['patch'] }],
+                        });
+                        if (!dest) return;
+                        setBusy(true);
+                        setError('');
+                        await call('shelf_export_patch', {
+                          root,
+                          id: selectedShelf.id,
+                          paths: selectedShelfPaths,
+                          destination: dest,
+                        });
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })()
+                  }
+                >
+                  导出为 Patch…
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void (async () => {
+                      setBusy(true);
+                      setError('');
+                      try {
+                        await call('shelf_delete', {
+                          root,
+                          id: selectedShelf.id,
+                          permanent: selectedShelf.deleted,
+                        });
+                        setSelectedShelfId('');
+                        setPreviewShelfFile(null);
+                        await load();
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })()
+                  }
+                >
+                  {selectedShelf.deleted ? '彻底删除' : '移入回收站'}
+                </button>
+              </div>
+              <div class="modal-actions">
+                <input
+                  aria-label="重命名 Shelf"
+                  value={shelfRenameText}
+                  disabled={busy}
+                  placeholder="修改 Shelf 名称"
+                  onInput={(event) => setShelfRenameText(event.currentTarget.value)}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !shelfRenameText.trim() || shelfRenameText.trim() === selectedShelf.name}
+                  onClick={() =>
+                    void (async () => {
+                      setBusy(true);
+                      setError('');
+                      try {
+                        await call('shelf_rename', {
+                          root,
+                          id: selectedShelf.id,
+                          name: shelfRenameText.trim(),
+                        });
+                        await load();
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    })()
+                  }
+                >
+                  重命名 Shelf
+                </button>
+              </div>
+            </>
+          )}
+          <h3>保存新的独立 Patch Shelf</h3>
+          <label>
+            <input
+              type="checkbox"
+              checked={shelfRollback}
+              disabled={busy}
+              onChange={(event) => setShelfRollback(event.currentTarget.checked)}
+            />
+            保存后回滚工作区修改（包含未跟踪文件，不占用 Git Stash 栈）
+          </label>
+          <label>
+            Shelf 说明
+            <input
+              aria-label="新 Shelf 说明"
+              value={message}
+              disabled={busy}
+              placeholder="Work in progress"
+              onInput={(event) => setMessage(event.currentTarget.value)}
+            />
+          </label>
+          <p>勾选文件后只将所选文件存入 Shelf，留空保存全部更改。</p>
+          <div class="navigation-files">
+            {data?.status.changes
+              .filter((change) => !change.conflict)
+              .map((change) => (
+                <label key={change.path}>
+                  <input
+                    type="checkbox"
+                    checked={paths.includes(change.path)}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setPaths(
+                        event.currentTarget.checked
+                          ? [...paths, change.path]
+                          : paths.filter((p) => p !== change.path),
+                      )
+                    }
+                  />
+                  {change.path}
+                </label>
+              ))}
+          </div>
+          <button
+            type="button"
+            disabled={busy || !data?.status.changes.length || data.status.changes.some((c) => c.conflict)}
+            onClick={() =>
+              void (async () => {
+                setBusy(true);
+                setError('');
+                try {
+                  await call('shelf_save', {
+                    root,
+                    name: message.trim() || 'Work in progress',
+                    paths,
+                    rollback: shelfRollback,
+                  });
+                  setPaths([]);
+                  setMessage('');
+                  await load();
+                  await onChanged();
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setBusy(false);
+                }
+              })()
+            }
+          >
+            保存 Shelf
+          </button>
+        </div>
+      )}
       {stashTab && (
         <div class="transport-form">
           <label>
-              {tab === 'shelves' ? 'Shelf' : 'Stash'}
+              Stash
             <select
               aria-label="选择 Stash"
               disabled={busy}
@@ -528,9 +932,9 @@ export function RepositoryManager({
             expectedStashes: data!.status.stashes,
           })}>从储藏创建并切换分支</button>
           <p>从储藏的原始基准恢复文件及暂存布局，成功后删除该条储藏。发生冲突时保留储藏。</p>
-          {tab === 'stashes' && <><label><input type="checkbox" checked={clearConfirm} disabled={busy || !visibleStashes.length} onChange={event => setClearConfirm(event.currentTarget.checked)} />确认清空此仓库的 {visibleStashes.length} 条 Stash</label>
-          <button disabled={busy || !clearConfirm || !visibleStashes.length} onClick={() => void mutate('clear_stashes', visibleStashes)}>清空全部储藏</button></>}
-          <h3>保存新的 {tab === 'shelves' ? 'Shelf' : 'Stash'}</h3>
+          <label><input type="checkbox" checked={clearConfirm} disabled={busy || !visibleStashes.length} onChange={event => setClearConfirm(event.currentTarget.checked)} />确认清空此仓库的 {visibleStashes.length} 条 Stash</label>
+          <button disabled={busy || !clearConfirm || !visibleStashes.length} onClick={() => void mutate('clear_stashes', visibleStashes)}>清空全部储藏</button>
+          <h3>保存新的 Stash</h3>
           <label><input type="checkbox" checked={keepIndex} disabled={busy} onChange={event => setKeepIndex(event.currentTarget.checked)} />保存后保留暂存内容 · --keep-index</label>
           <label>
             说明
@@ -575,7 +979,7 @@ export function RepositoryManager({
             disabled={busy || !data?.status.changes.length || invalidUntrackedSelection || data.status.changes.some(change => change.conflict)}
             onClick={() => stashAction('save')}
           >
-            保存 {tab === 'shelves' ? 'Shelf' : 'Stash'}
+            保存 Stash
           </button>
           {invalidUntrackedSelection && <p class="error-text">开启“包含未跟踪文件”后可保存所选新增文件。</p>}
         </div>

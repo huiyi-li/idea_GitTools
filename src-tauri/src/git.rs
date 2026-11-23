@@ -20,6 +20,7 @@ pub(crate) mod merge;
 pub(crate) mod navigation;
 pub(crate) mod remotes;
 pub(crate) mod review;
+pub(crate) mod shelf;
 pub(crate) mod worktrees;
 
 const MAX_OUTPUT: usize = 8 * 1024 * 1024;

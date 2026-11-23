@@ -27,8 +27,12 @@ fn relevant_path(path: &Path, metadata_roots: &[Vec<String>]) -> bool {
         return !parts.iter().any(|part| SKIP_WORKTREE_DIRS.contains(&part.as_str()));
     };
     let relative = &parts[start..];
-    if relative.first().is_some_and(|part| part == "ideagittool-local-history")
-        || relative.first().is_some_and(|part| part == "worktrees") && relative.get(2).is_some_and(|part| part == "ideagittool-local-history") { return false; }
+    if relative.first().is_some_and(|part| matches!(part.as_str(), "ideagittool-local-history" | "ideagittool-shelf"))
+        || relative.first().is_some_and(|part| part == "worktrees")
+            && relative.get(2).is_some_and(|part| matches!(part.as_str(), "ideagittool-local-history" | "ideagittool-shelf"))
+    {
+        return false;
+    }
     if relative.last().is_some_and(|part| part.ends_with(".lock") || part.starts_with(".tmp")) { return false; }
     !relative.first().is_some_and(|part| matches!(part.as_str(), "objects" | "logs"))
 }
@@ -78,6 +82,8 @@ mod tests {
         for path in [
             "/repo/.git/ideagittool-local-history/file.snapshot",
             "/repo/.git/ideagittool-local-history/file.json",
+            "/repo/.git/ideagittool-shelf/shelf.json",
+            "/repo/.git/ideagittool-shelf/123.patch",
             "/repo/.git/index.lock",
             "/repo/.git/.tmp123",
             "/repo/.git/objects/aa/blob",

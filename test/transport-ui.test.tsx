@@ -898,3 +898,102 @@ test('a failed clone retains its fields, shows Git output and can start a correc
     render(null, host);
   }
 });
+
+test('independent patch-based Shelf supports partial file unshelve, recycle bin restore, and saving new shelves', async () => {
+  const calls: { command: string; args: any }[] = [];
+  const activeEntry = {
+    id: 'shelf-1',
+    name: 'Feature WIP',
+    timestamp: 1730000000000,
+    baseHead: head,
+    baseBranch: 'main',
+    deleted: false,
+    files: [
+      {
+        path: 'src/a.ts',
+        oldPath: null,
+        status: 'M',
+        before: 'old a\n',
+        after: 'new a\n',
+        binary: false,
+      },
+      {
+        path: 'src/b.ts',
+        oldPath: null,
+        status: 'A',
+        before: '',
+        after: 'new b\n',
+        binary: false,
+      },
+    ],
+  };
+  const deletedEntry = {
+    ...activeEntry,
+    id: 'shelf-deleted',
+    name: 'Restored Shelf',
+    deleted: true,
+  };
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    calls.push({ command, args });
+    if (command === 'repository_management') {
+      return {
+        status: {
+          ...status,
+          changes: [{ path: 'src/dirty.ts', oldPath: null, index: ' ', worktree: 'M', staged: false, unstaged: true, conflict: false }],
+        },
+        tags: [],
+        remotes: [],
+      };
+    }
+    if (command === 'shelf_list') {
+      return [activeEntry, deletedEntry];
+    }
+    if (command === 'shelf_apply') {
+      return { conflicts: false };
+    }
+    if (command === 'shelf_restore' || command === 'shelf_save' || command === 'shelf_rename') {
+      return activeEntry;
+    }
+    throw Error(command);
+  };
+  render(<RepositoryManager root="C:/repo" initialTab="shelves" onClose={() => {}} onChanged={async () => {}} />, host);
+  try {
+    await waitFor(() => host.querySelector('[aria-label="选择 Shelf"] option[value="shelf-1"]'));
+    changeSelect('[aria-label="选择 Shelf"]', 'shelf-1');
+    await waitFor(() => host.textContent?.includes('[M] src/a.ts'));
+
+    // Select a single file for partial Unshelve
+    const fileCheckbox = [...host.querySelectorAll<HTMLInputElement>('[aria-label="Shelf 文件列表"] input[type="checkbox"]')][0];
+    fileCheckbox.click();
+    await waitFor(() => host.textContent?.includes('Unshelve 选中的 1 个文件'));
+    button('Unshelve 选中的 1 个文件').click();
+    await waitFor(() => calls.some((c) => c.command === 'shelf_apply'));
+    const applyCall = calls.find((c) => c.command === 'shelf_apply')!;
+    assert.equal(applyCall.args.id, 'shelf-1');
+    assert.deepEqual(applyCall.args.paths, ['src/a.ts']);
+    assert.equal(applyCall.args.removeApplied, true);
+
+    // Switch to Recycle Bin and restore a deleted shelf
+    const recycleToggle = [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((el) =>
+      el.parentElement?.textContent?.includes('显示已恢复／回收站 Shelf'),
+    )!;
+    await waitFor(() => !recycleToggle.disabled);
+    recycleToggle.click();
+    await waitFor(() => host.querySelector('[aria-label="选择 Shelf"] option[value="shelf-deleted"]'));
+    changeSelect('[aria-label="选择 Shelf"]', 'shelf-deleted');
+    await waitFor(() => [...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === '还原到活动列表'));
+    button('还原到活动列表').click();
+    await waitFor(() => calls.some((c) => c.command === 'shelf_restore'));
+
+    // Save a new independent patch shelf
+    input('新 Shelf 说明', 'Quick patch shelf');
+    await waitFor(() => !button('保存 Shelf').disabled);
+    button('保存 Shelf').click();
+    await waitFor(() => calls.some((c) => c.command === 'shelf_save'));
+    const saveCall = calls.find((c) => c.command === 'shelf_save')!;
+    assert.equal(saveCall.args.name, 'Quick patch shelf');
+    assert.equal(saveCall.args.rollback, true);
+  } finally {
+    render(null, host);
+  }
+});

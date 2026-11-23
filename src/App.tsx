@@ -730,6 +730,43 @@ export function App() {
     });
   }
 
+  async function exportWorktreePatch(paths: string[] = []) {
+    if (!root) return;
+    await perform('导出本地更改 Patch', async () => {
+      const destination = await saveDialog({
+        title: '保存本地更改为 Patch',
+        defaultPath: 'local-changes.patch',
+        filters: [{ name: 'Patch', extensions: ['patch'] }],
+      });
+      if (!destination) return;
+      await call('create_worktree_patch', { root, paths, destination });
+      setNotice('已导出本地更改为 Patch 文件');
+    });
+  }
+
+  async function applyExternalPatch() {
+    if (!root) return;
+    await perform('应用 Patch 文件', async () => {
+      const sourcePath = await open({
+        multiple: false,
+        directory: false,
+        title: '选择要应用到工作区的 Patch 文件',
+        filters: [{ name: 'Patch', extensions: ['patch', 'diff'] }],
+      });
+      if (typeof sourcePath !== 'string' || !sourcePath) return;
+      try {
+        const res = await call<{ conflicts: boolean; message: string }>('apply_worktree_patch', {
+          root,
+          sourcePath,
+        });
+        setNotice(res?.message || 'Patch 已应用');
+        await refresh(root, res?.conflicts);
+      } finally {
+        await refresh(root).catch((e) => setError(String(e)));
+      }
+    });
+  }
+
   function previewHistory(
     action: HistoryAction,
     target: { target: string; hash: string; label: string; parents?: string[] },
@@ -1413,8 +1450,15 @@ export function App() {
                       active={groupFilesByDir}
                       onClick={() => setGroupFilesByDir(!groupFilesByDir)}
                     />
-                    <ActionMenu label="本地更改操作" text="操作" disabled={!!busy || !status.changes.length || !!conflicts.length}>
-                      <button onClick={() => void previewDiscard(status.changes.map(change => change.path), 'all')}>放弃全部本地更改…</button>
+                    <ActionMenu label="本地更改操作" text="操作" disabled={!!busy || !!conflicts.length}>
+                      {!!status.changes.length && (
+                        <button onClick={() => void previewDiscard(status.changes.map(change => change.path), 'all')}>放弃全部本地更改…</button>
+                      )}
+                      {!!status.changes.length && (
+                        <button onClick={() => void exportWorktreePatch()}>导出本地更改为 Patch…</button>
+                      )}
+                      <button onClick={() => void applyExternalPatch()}>应用外部 Patch 文件…</button>
+                      <button onClick={() => openManager('shelves')}>管理 Shelf…</button>
                     </ActionMenu>
                     <ToolButton
                       icon="vcsimpl/stash"
@@ -1886,8 +1930,12 @@ export function App() {
             onSubmit={(event) => {
               event.preventDefault();
               void mutate(
-                dialog.kind === 'branch' ? 'create_branch' : 'save_stash',
-                dialog.kind === 'branch' ? { name: dialog.value } : { message: dialog.kind === 'shelf' ? `Shelf: ${dialog.value}` : dialog.value },
+                dialog.kind === 'branch' ? 'create_branch' : dialog.kind === 'shelf' ? 'shelf_save' : 'save_stash',
+                dialog.kind === 'branch'
+                  ? { name: dialog.value }
+                  : dialog.kind === 'shelf'
+                    ? { name: dialog.value, paths: [], rollback: true }
+                    : { message: dialog.value },
                 dialog.kind === 'branch' ? '创建分支' : dialog.kind === 'shelf' ? '保存 Shelf' : '保存 Stash',
               ).then((success) => {
                 if (success) setDialog(null);
@@ -1904,7 +1952,13 @@ export function App() {
                 onInput={(e) => setDialog({ ...dialog, value: e.currentTarget.value })}
               />
             </label>
-            {dialog.kind !== 'branch' && <p class="muted">包含未跟踪文件，保存后清理工作区。Shelf 使用 Git stash 后端保存。</p>}
+            {dialog.kind !== 'branch' && (
+              <p class="muted">
+                {dialog.kind === 'shelf'
+                  ? '以独立 Patch 形式保存在本仓库 Shelf 目录（包含未跟踪文件），不混入 Git Stash 栈。'
+                  : '包含未跟踪文件，保存后清理工作区。'}
+              </p>
+            )}
             {error && <p class="error-text">{error}</p>}
             <div class="modal-actions">
               <button type="button" disabled={!!busy} onClick={() => setDialog(null)}>
