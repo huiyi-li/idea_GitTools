@@ -40,13 +40,14 @@ impl Git {
             .ok_or("文件不属于所选提交的变更列表")?;
         let parent = details.commit.parents.first().cloned();
         let before_path = change.old_path.as_deref().unwrap_or(path);
-        let before = self
-            .blob_snapshot(parent.as_deref(), before_path, allow_large)
-            .await?;
-        let after = self
-            .blob_snapshot(Some(revision), path, allow_large)
-            .await?;
-        let current = match self.review_worktree_with_options(path, allow_large).await {
+        let (before_res, after_res, current_res) = tokio::join!(
+            self.blob_snapshot(parent.as_deref(), before_path, allow_large),
+            self.blob_snapshot(Some(revision), path, allow_large),
+            self.review_worktree_with_options(path, allow_large),
+        );
+        let before = before_res?;
+        let after = after_res?;
+        let current = match current_res {
             Ok(current) => current,
             Err(error) => {
                 let mut file = FileSnapshot::new(path, None, SnapshotState::Unavailable, &[]);
@@ -86,8 +87,10 @@ impl Git {
             selected.to_owned()
         };
         validate_path(&path)?;
-        let file = self.worktree_snapshot(&path, allow_large).await?;
-        let repository = self.repository().await?;
+        let (file, repository) = tokio::try_join!(
+            self.worktree_snapshot(&path, allow_large),
+            self.repository(),
+        )?;
         Ok(WorktreeSnapshot {
             file,
             branch: repository.branch.unwrap_or_else(|| "detached HEAD".into()),

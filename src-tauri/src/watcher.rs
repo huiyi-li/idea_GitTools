@@ -17,11 +17,15 @@ fn components(path: &Path) -> Vec<String> {
     }).collect()
 }
 
+const SKIP_WORKTREE_DIRS: &[&str] = &["node_modules", "target", "dist", ".venv", "venv"];
+
 fn relevant_path(path: &Path, metadata_roots: &[Vec<String>]) -> bool {
     let parts = components(path);
     let metadata_start = metadata_roots.iter().filter(|root| parts.starts_with(root)).map(Vec::len).max()
         .or_else(|| parts.iter().position(|part| part == ".git").map(|index| index + 1));
-    let Some(start) = metadata_start else { return true; };
+    let Some(start) = metadata_start else {
+        return !parts.iter().any(|part| SKIP_WORKTREE_DIRS.contains(&part.as_str()));
+    };
     let relative = &parts[start..];
     if relative.first().is_some_and(|part| part == "ideagittool-local-history")
         || relative.first().is_some_and(|part| part == "worktrees") && relative.get(2).is_some_and(|part| part == "ideagittool-local-history") { return false; }
@@ -71,7 +75,18 @@ mod tests {
 
     #[test]
     fn history_and_temporary_metadata_writes_do_not_trigger_refresh() {
-        for path in ["/repo/.git/ideagittool-local-history/file.snapshot", "/repo/.git/ideagittool-local-history/file.json", "/repo/.git/index.lock", "/repo/.git/.tmp123", "/repo/.git/objects/aa/blob", "/repo/.git/logs/HEAD"] {
+        for path in [
+            "/repo/.git/ideagittool-local-history/file.snapshot",
+            "/repo/.git/ideagittool-local-history/file.json",
+            "/repo/.git/index.lock",
+            "/repo/.git/.tmp123",
+            "/repo/.git/objects/aa/blob",
+            "/repo/.git/logs/HEAD",
+            "/repo/node_modules/pkg/index.js",
+            "/repo/target/debug/app.exe",
+            "/repo/dist/bundle.js",
+            "/repo/.venv/lib/site.py",
+        ] {
             assert!(!relevant_path(Path::new(path), &[]), "{path}");
         }
         for path in ["/repo/file.txt", "/repo/ideagittool-local-history/source.ts", "/repo/.git/index", "/repo/.git/HEAD", "/repo/.git/refs/heads/logs"] {

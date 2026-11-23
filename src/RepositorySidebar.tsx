@@ -39,12 +39,18 @@ export function RepositorySidebar({
   onEdit: (branch: Branch, action: 'rename' | 'delete') => void;
 }) {
   const [search, setSearch] = useState('');
+  const [groupByDir, setGroupByDir] = useState(() => readSaved<boolean>('branch.groupByDir', false) === true);
   const [context, setContext] = useState<{ branch: string; point: { x: number; y: number } }>();
   const [stashContext, setStashContext] = useState<{ reference: string; point: { x: number; y: number } }>();
   const [favorites, setFavorites] = useState<string[]>(() => readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
   useEffect(() => {
     setFavorites(readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
   }, [status.repository.root]);
+  function toggleGroupByDir() {
+    const next = !groupByDir;
+    setGroupByDir(next);
+    try { save('branch.groupByDir', next); } catch { /* Keep session state */ }
+  }
   function toggleFavorite(full: string) {
     const next = favorites.includes(full) ? favorites.filter((item) => item !== full) : [...favorites, full];
     setFavorites(next);
@@ -57,6 +63,108 @@ export function RepositorySidebar({
     status.repository.operation !== 'none' ||
     !!status.changes.length;
   const mergeDisabled = !status.repository.head || !status.repository.branch || status.repository.operation !== 'none' || status.changes.some(change => change.conflict);
+
+  function renderBranchRow(item: Branch, displayLabel = item.name) {
+    return (
+      <div class={`branch-line ${item.current ? 'current-branch' : ''}`} key={item.full}
+        onContextMenu={event => { event.preventDefault(); if (!busy) setContext({ branch: item.full, point: { x: event.clientX, y: event.clientY } }); }}>
+        <button
+          class={`branch-item ${branch === item.full ? 'active' : ''}`}
+          title={`${item.name}${item.upstream ? ` → ${item.upstream}` : ''}\n单击筛选日志，双击签出`}
+          onClick={() => onFilter(item.full)}
+          onKeyDown={event => {
+            if ((event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') && !busy) {
+              event.preventDefault();
+              const bounds = event.currentTarget.getBoundingClientRect();
+              setContext({ branch: item.full, point: { x: bounds.left + 20, y: bounds.bottom } });
+            }
+          }}
+          onDblClick={() => {
+            if (!busy && !item.current) onCheckout(item.full);
+          }}
+        >
+          <Icon name={item.current ? 'general/greenCheckmark' : 'dvcs/branchLabel'} />
+          <span class="ellipsis">{displayLabel}</span>
+          {!item.remote && (item.ahead > 0 || item.behind > 0) && (
+            <span class="branch-tracking" title={`${item.upstream} · 领先 ${item.ahead}，落后 ${item.behind}`}>
+              {item.ahead > 0 && <span class="branch-ahead">↑{item.ahead}</span>}
+              {item.behind > 0 && <span class="branch-behind">↓{item.behind}</span>}
+            </span>
+          )}
+        </button>
+        <div class="branch-actions">
+          <ToolButton icon="general/save" label={favorites.includes(item.full) ? `取消收藏 ${item.name}` : `收藏 ${item.name}`} active={favorites.includes(item.full)} disabled={busy} onClick={() => toggleFavorite(item.full)} />
+          <ActionMenu label={`分支操作 ${item.name}`} disabled={busy} contextPoint={context?.branch === item.full ? context.point : undefined}>
+            <div class="menu-caption">{item.name} · {item.hash.slice(0, 8)}</div>
+            <button disabled={item.current} onClick={() => onCheckout(item.full)}>
+              签出 {item.name}
+            </button>
+            {item.remote && <button onClick={() => onCheckout(item.full)}>签出并创建本地跟踪分支…</button>}
+            <button disabled={!status.repository.head || status.repository.operation !== 'none'} onClick={() => onCreate(item)}>从此分支新建并签出…</button>
+            <button
+              disabled={!status.repository.head}
+              onClick={() => onAction(item, 'compare')}
+            >
+              与当前分支比较
+            </button>
+            <hr />
+            <button
+              disabled={item.current || mergeDisabled}
+              title={status.changes.length ? 'Git 将检查是否会覆盖本地更改' : ''}
+              onClick={() => onAction(item, 'merge')}
+            >
+              Merge 到当前分支…
+            </button>
+            <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-ff-only')}>仅快进合并到 {status.repository.branch}…</button>
+            <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-no-ff')}>创建合并提交到 {status.repository.branch}…</button>
+            <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-squash')}>Squash 合并到 {status.repository.branch}…</button>
+            <button
+              disabled={item.current || historyDisabled}
+              title={status.changes.length ? '先提交或保存到 Stash' : ''}
+              onClick={() => onAction(item, 'rebase')}
+            >
+              Rebase 当前分支到此处…
+            </button>
+            <hr />
+            {!item.remote && <button disabled={status.repository.operation !== 'none'} onClick={() => onEdit(item, 'rename')}>重命名分支…</button>}
+            <button disabled={item.current || status.repository.operation !== 'none'} onClick={() => onEdit(item, 'delete')}>{item.remote ? '删除远程分支…' : '删除本地分支…'}</button>
+          </ActionMenu>
+        </div>
+      </div>
+    );
+  }
+
+  function renderBranchList(items: Branch[]) {
+    if (!groupByDir) return items.map((item) => renderBranchRow(item));
+    const grouped = new Map<string, Branch[]>();
+    const topLevel: Branch[] = [];
+    for (const item of items) {
+      const slash = item.name.indexOf('/');
+      if (slash > 0) {
+        const prefix = item.name.slice(0, slash);
+        grouped.set(prefix, [...(grouped.get(prefix) ?? []), item]);
+      } else {
+        topLevel.push(item);
+      }
+    }
+    return (
+      <>
+        {[...grouped.entries()].map(([prefix, list]) => (
+          <details class="tree-group branch-dir-group" open key={`dir-${prefix}`}>
+            <summary>
+              <Icon name="general/chevronRight" class="tree-chevron" />
+              <Icon name="nodes/folder" />
+              <span class="ellipsis">{prefix}</span>
+              <span class="tree-hint">{list.length}</span>
+            </summary>
+            {list.map((item) => renderBranchRow(item, item.name.slice(prefix.length + 1)))}
+          </details>
+        ))}
+        {topLevel.map((item) => renderBranchRow(item))}
+      </>
+    );
+  }
+
   return (
     <aside class="sidebar">
       <div class="panel-heading">
@@ -69,6 +177,7 @@ export function RepositorySidebar({
         <div class="branch-tools">
           <ToolButton icon="vcs/fetch" label="Fetch" disabled={busy} onClick={onFetch} />
           <ToolButton icon="general/locate" label="筛选当前分支" onClick={() => onFilter('HEAD')} />
+          <ToolButton icon="nodes/folder" label="按目录分组分支" active={groupByDir} onClick={toggleGroupByDir} />
         </div>
         <div class="branches-body">
           <div class="branch-search">
@@ -111,75 +220,7 @@ export function RepositorySidebar({
                   {remote ? '远程' : '本地'}
                   <span class="tree-hint">{branches.filter((item) => item.remote === remote).length}</span>
                 </summary>
-                {branches
-                  .filter((item) => item.remote === remote)
-                  .map((item) => (
-                    <div class={`branch-line ${item.current ? 'current-branch' : ''}`} key={item.full}
-                      onContextMenu={event => { event.preventDefault(); if (!busy) setContext({ branch: item.full, point: { x: event.clientX, y: event.clientY } }); }}>
-                      <button
-                        class={`branch-item ${branch === item.full ? 'active' : ''}`}
-                        title={`${item.name}${item.upstream ? ` → ${item.upstream}` : ''}\n单击筛选日志，双击签出`}
-                        onClick={() => onFilter(item.full)}
-                        onKeyDown={event => {
-                          if ((event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') && !busy) {
-                            event.preventDefault();
-                            const bounds = event.currentTarget.getBoundingClientRect();
-                            setContext({ branch: item.full, point: { x: bounds.left + 20, y: bounds.bottom } });
-                          }
-                        }}
-                        onDblClick={() => {
-                          if (!busy && !item.current) onCheckout(item.full);
-                        }}
-                      >
-                        <Icon name={item.current ? 'general/greenCheckmark' : 'dvcs/branchLabel'} />
-                        <span class="ellipsis">{item.name}</span>
-                        {!item.remote && (item.ahead > 0 || item.behind > 0) && (
-                          <span class="branch-tracking" title={`${item.upstream} · 领先 ${item.ahead}，落后 ${item.behind}`}>
-                            {item.ahead > 0 && <span class="branch-ahead">↑{item.ahead}</span>}
-                            {item.behind > 0 && <span class="branch-behind">↓{item.behind}</span>}
-                          </span>
-                        )}
-                      </button>
-                      <div class="branch-actions">
-                        <ToolButton icon="general/save" label={favorites.includes(item.full) ? `取消收藏 ${item.name}` : `收藏 ${item.name}`} active={favorites.includes(item.full)} disabled={busy} onClick={() => toggleFavorite(item.full)} />
-                        <ActionMenu label={`分支操作 ${item.name}`} disabled={busy} contextPoint={context?.branch === item.full ? context.point : undefined}>
-                          <div class="menu-caption">{item.name} · {item.hash.slice(0, 8)}</div>
-                          <button disabled={item.current} onClick={() => onCheckout(item.full)}>
-                            签出 {item.name}
-                          </button>
-                          {item.remote && <button onClick={() => onCheckout(item.full)}>签出并创建本地跟踪分支…</button>}
-                          <button disabled={!status.repository.head || status.repository.operation !== 'none'} onClick={() => onCreate(item)}>从此分支新建并签出…</button>
-                          <button
-                            disabled={!status.repository.head}
-                            onClick={() => onAction(item, 'compare')}
-                          >
-                            与当前分支比较
-                          </button>
-                          <hr />
-                          <button
-                            disabled={item.current || mergeDisabled}
-                            title={status.changes.length ? 'Git 将检查是否会覆盖本地更改' : ''}
-                            onClick={() => onAction(item, 'merge')}
-                          >
-                            Merge 到当前分支…
-                          </button>
-                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-ff-only')}>仅快进合并到 {status.repository.branch}…</button>
-                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-no-ff')}>创建合并提交到 {status.repository.branch}…</button>
-                          <button disabled={item.current || mergeDisabled} onClick={() => onAction(item, 'merge-squash')}>Squash 合并到 {status.repository.branch}…</button>
-                          <button
-                            disabled={item.current || historyDisabled}
-                            title={status.changes.length ? '先提交或保存到 Stash' : ''}
-                            onClick={() => onAction(item, 'rebase')}
-                          >
-                            Rebase 当前分支到此处…
-                          </button>
-                          <hr />
-                          {!item.remote && <button disabled={status.repository.operation !== 'none'} onClick={() => onEdit(item, 'rename')}>重命名分支…</button>}
-                          <button disabled={item.current || status.repository.operation !== 'none'} onClick={() => onEdit(item, 'delete')}>{item.remote ? '删除远程分支…' : '删除本地分支…'}</button>
-                        </ActionMenu>
-                      </div>
-                    </div>
-                  ))}
+                {renderBranchList(branches.filter((item) => item.remote === remote))}
               </details>
             ))}
             {!branches.length && search && <div class="sidebar-hint">没有匹配的分支</div>}
