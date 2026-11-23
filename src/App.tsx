@@ -293,6 +293,12 @@ export function App() {
   const [interactiveBase, setInteractiveBase] = useState('');
   const [interactiveAction, setInteractiveAction] = useState<{ hash: string; action: 'reword' | 'fixup' | 'squash' | 'drop' }>();
   const [fileHistory, setFileHistory] = useState(false);
+  const [fileHistoryTab, setFileHistoryTab] = useState<'history' | 'blame' | 'selection' | 'tree'>('history');
+  const [fileHistoryRevision, setFileHistoryRevision] = useState<string | null>(null);
+  const [inMemoryEditCommit, setInMemoryEditCommit] = useState<Details | null>(null);
+  const [inMemoryEditPaths, setInMemoryEditPaths] = useState<string[]>([]);
+  const [inMemoryEditAction, setInMemoryEditAction] = useState<'extract-changes' | 'drop-changes'>('extract-changes');
+  const [inMemoryEditMessage, setInMemoryEditMessage] = useState('');
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [showMultiRepository, setShowMultiRepository] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
@@ -1070,7 +1076,8 @@ export function App() {
             <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
             <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
             <button onClick={() => { setInteractiveBase(''); setInteractiveAction(undefined); setShowInteractive(true); }}>交互式 Rebase</button>
-            <button onClick={() => setFileHistory(true)}>文件历史与 Blame</button>
+            <button onClick={() => { setFileHistoryTab('history'); setFileHistoryRevision(target?.revision ?? null); setFileHistory(true); }}>文件历史与 Blame</button>
+            <button onClick={() => { setFileHistoryTab('tree'); setFileHistoryRevision(selected ?? status?.repository.head ?? 'HEAD'); setFileHistory(true); }}>浏览提交时刻仓库文件树</button>
             <button onClick={() => setLocalHistoryPath('')}>Local History</button>
             <button onClick={() => setShowMultiRepository(true)}>批量远程同步与跨仓库记录</button>
             <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
@@ -1383,6 +1390,30 @@ export function App() {
                         >
                           Revert…
                         </button>
+                        <hr />
+                        <button
+                          disabled={!selectedCommit}
+                          onClick={() => {
+                            if (!selectedCommit) return;
+                            setFileHistoryTab('tree');
+                            setFileHistoryRevision(selectedCommit.hash);
+                            setFileHistory(true);
+                          }}
+                        >
+                          浏览此提交的完整仓库文件树…
+                        </button>
+                        <button
+                          disabled={!details || details.commit.parents.length !== 1 || !status.repository.branch || status.repository.operation !== 'none'}
+                          onClick={() => {
+                            if (!details) return;
+                            setInMemoryEditCommit(details);
+                            setInMemoryEditPaths([]);
+                            setInMemoryEditAction('extract-changes');
+                            setInMemoryEditMessage(`Extract from ${details.commit.subject}`);
+                          }}
+                        >
+                          拆分或剔除此提交中的文件变更 (In-Memory)…
+                        </button>
                       </ActionMenu>
                     </div>
                     {loadingDetails ? (
@@ -1693,7 +1724,7 @@ export function App() {
       {hunks && root && <HunkDialog key={`${root}-${hunks.path}-${hunks.area}`} root={root} {...hunks} onClose={() => setHunks(null)} onChanged={() => refresh(root)} />}
       {showAmend && root && <AmendDialog key={root} root={root} onClose={() => setShowAmend(false)} onChanged={() => refresh(root)} />}
       {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}-${interactiveAction?.hash ?? ''}-${interactiveAction?.action ?? ''}`} root={root} initialBase={interactiveBase} initialAction={interactiveAction} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
-      {fileHistory && root && <FileHistoryDialog key={root} root={root} initialPath={target?.path ?? ''} initialRevision={target?.revision} onClose={() => setFileHistory(false)} />}
+      {fileHistory && root && <FileHistoryDialog key={`${root}-${fileHistoryTab}-${fileHistoryRevision ?? ''}`} root={root} initialPath={target?.path ?? ''} initialRevision={fileHistoryRevision ?? target?.revision} initialTab={fileHistoryTab} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
       {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} />}
       {transfer && root && <TransferDialog key={`${root}-${transfer}`} root={root} action={transfer} onClose={() => setTransfer(null)} onChanged={(openConflicts) => refresh(root, openConflicts ?? true)} />}
@@ -1970,6 +2001,104 @@ export function App() {
               </button>
               <button type="submit" class="primary" disabled={!!busy || !dialog.value.trim()}>
                 {busy ? '处理中…' : '确定'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {inMemoryEditCommit && root && (
+        <Modal
+          title="内存级提交文件拆分与剔除 (In-Memory)"
+          busy={!!busy}
+          onClose={() => setInMemoryEditCommit(null)}
+          class="history-dialog workflow-dialog"
+        >
+          <h2>内存级提交变更拆分与剔除 (In-Memory)</h2>
+          <p class="muted">
+            在隔离临时索引中通过 <code>git commit-tree</code> 与 <code>git merge-tree --write-tree</code> 改写提交{" "}
+            <code>{inMemoryEditCommit.commit.hash.slice(0, 8)}</code>（{inMemoryEditCommit.commit.subject}），无需清理工作区中其他无关文件的未提交修改。
+          </p>
+          <form
+            class="transport-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void mutate(
+                'edit_commit_changes_in_memory',
+                {
+                  request: {
+                    revision: inMemoryEditCommit.commit.hash,
+                    action: inMemoryEditAction,
+                    paths: inMemoryEditPaths,
+                    message: inMemoryEditAction === 'extract-changes' ? inMemoryEditMessage : null,
+                  },
+                },
+                inMemoryEditAction === 'extract-changes' ? '拆分提交变更' : '剔除提交变更',
+              ).then((ok) => {
+                if (ok) setInMemoryEditCommit(null);
+              });
+            }}
+          >
+            <label>
+              改写方式
+              <select
+                aria-label="内存提交改写方式"
+                value={inMemoryEditAction}
+                disabled={!!busy}
+                onChange={(event) =>
+                  setInMemoryEditAction(
+                    event.currentTarget.value as 'extract-changes' | 'drop-changes',
+                  )
+                }
+              >
+                <option value="extract-changes">将所选文件的修改拆分为独立提交 (Extract Selected Changes)</option>
+                <option value="drop-changes">从该提交中直接剔除所选文件的修改 (Drop Selected Changes)</option>
+              </select>
+            </label>
+            {inMemoryEditAction === 'extract-changes' && (
+              <label>
+                新拆分提交的说明
+                <input
+                  aria-label="拆分提交说明"
+                  required
+                  value={inMemoryEditMessage}
+                  disabled={!!busy}
+                  onInput={(event) => setInMemoryEditMessage(event.currentTarget.value)}
+                />
+              </label>
+            )}
+            <div class="navigation-files" aria-label="内存改写文件列表">
+              {inMemoryEditCommit.changes.map((change) => (
+                <label key={change.path}>
+                  <input
+                    type="checkbox"
+                    checked={inMemoryEditPaths.includes(change.path)}
+                    disabled={!!busy}
+                    onChange={(event) =>
+                      setInMemoryEditPaths(
+                        event.currentTarget.checked
+                          ? [...inMemoryEditPaths, change.path]
+                          : inMemoryEditPaths.filter((p) => p !== change.path),
+                      )
+                    }
+                  />
+                  [{change.index !== ' ' ? change.index : change.workTree}] {change.path}
+                </label>
+              ))}
+            </div>
+            <div class="modal-actions">
+              <button type="button" disabled={!!busy} onClick={() => setInMemoryEditCommit(null)}>
+                取消
+              </button>
+              <button
+                type="submit"
+                class="primary"
+                disabled={
+                  !!busy ||
+                  !inMemoryEditPaths.length ||
+                  (inMemoryEditAction === 'extract-changes' && !inMemoryEditMessage.trim())
+                }
+              >
+                执行内存改写
               </button>
             </div>
           </form>

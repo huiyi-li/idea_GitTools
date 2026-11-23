@@ -27,23 +27,45 @@ interface Blame {
   hasMore: boolean;
 }
 
+interface RevisionTreeEntry {
+  path: string;
+  mode: string;
+  objectHash: string;
+  size: number;
+}
+interface RevisionTree {
+  revision: string;
+  entries: RevisionTreeEntry[];
+  truncated: boolean;
+}
+
 export function FileHistoryDialog({
   root,
   initialPath,
   initialRevision,
+  initialTab = 'history',
+  initialSelection,
   onClose,
 }: {
   root: string;
   initialPath: string;
   initialRevision?: string | null;
+  initialTab?: 'history' | 'blame' | 'selection' | 'tree';
+  initialSelection?: { startLine: number; endLine: number };
   onClose: () => void;
 }) {
   const [input, setInput] = useState(initialPath);
   const [path, setPath] = useState(initialPath);
   const [revision, setRevision] = useState(initialRevision ?? null);
-  const [tab, setTab] = useState<'history' | 'blame'>('history');
+  const [treeRevisionInput, setTreeRevisionInput] = useState(initialRevision ?? 'HEAD');
+  const [tab, setTab] = useState<'history' | 'blame' | 'selection' | 'tree'>(initialTab);
+  const [startLine, setStartLine] = useState(initialSelection?.startLine ?? 1);
+  const [endLine, setEndLine] = useState(initialSelection?.endLine ?? 20);
   const [offset, setOffset] = useState(0);
   const [history, setHistory] = useState<History>();
+  const [selectionHistory, setSelectionHistory] = useState<History>();
+  const [revisionTree, setRevisionTree] = useState<RevisionTree>();
+  const [treeFilter, setTreeFilter] = useState('');
   const [blame, setBlame] = useState<Blame>();
   const [target, setTarget] = useState<DiffTarget | null>(null);
   const [before, setBefore] = useState<HistoryEntry>();
@@ -51,7 +73,7 @@ export function FileHistoryDialog({
   const [error, setError] = useState('');
   const anchor = useRef<{ key: string; revision: string }>();
   useEffect(() => {
-    if (!path) return;
+    if (tab !== 'tree' && !path) return;
     let current = true;
     setBusy(true);
     setError('');
@@ -70,9 +92,26 @@ export function FileHistoryDialog({
               anchor.current = { key, revision: value.revision };
             }
           })
-        : call<Blame>('file_blame', { root, path, revision, offset }).then((value) => {
-            if (current) setBlame(value);
-          });
+        : tab === 'blame'
+          ? call<Blame>('file_blame', { root, path, revision, offset }).then((value) => {
+              if (current) setBlame(value);
+            })
+          : tab === 'selection'
+            ? call<History>('selection_history', {
+                root,
+                path,
+                startLine,
+                endLine,
+                revision,
+              }).then((value) => {
+                if (current) setSelectionHistory(value);
+              })
+            : call<RevisionTree>('revision_tree', {
+                root,
+                revision: treeRevisionInput || revision || 'HEAD',
+              }).then((value) => {
+                if (current) setRevisionTree(value);
+              });
     void request
       .catch((error) => {
         if (current) setError(String(error));
@@ -83,7 +122,7 @@ export function FileHistoryDialog({
     return () => {
       current = false;
     };
-  }, [root, path, revision, tab, offset]);
+  }, [root, path, revision, tab, offset, startLine, endLine, treeRevisionInput]);
   function show(entry: HistoryEntry) {
     setTarget({
       path: entry.path,
@@ -92,37 +131,93 @@ export function FileHistoryDialog({
     });
   }
   const pageSize = tab === 'history' ? 100 : 200;
+  const activeHistory = tab === 'selection' ? selectionHistory : history;
+  const filteredTreeEntries =
+    revisionTree?.entries.filter((item) =>
+      item.path.toLowerCase().includes(treeFilter.trim().toLowerCase()),
+    ) ?? [];
   return (
     <Modal title="文件历史与 Blame" onClose={onClose} class="history-dialog workflow-dialog">
-      <h2>文件历史与 Blame</h2>
-      <form
-        class="modal-actions"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setPath(input);
-          setOffset(0);
-          setTarget(null);
-          setBefore(undefined);
-        }}
-      >
-        <input
-          aria-label="历史文件路径"
-          required
-          value={input}
-          onInput={(event) => setInput(event.currentTarget.value)}
-          placeholder="仓库相对路径"
-        />
-        <button>读取文件</button>
-        <button
-          type="button"
-          onClick={() => {
-            setRevision(null);
+      <h2>文件历史、选区演变与提交文件树</h2>
+      {tab !== 'tree' ? (
+        <form
+          class="modal-actions"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPath(input);
             setOffset(0);
+            setTarget(null);
+            setBefore(undefined);
           }}
         >
-          查看当前工作区
-        </button>
-      </form>
+          <input
+            aria-label="历史文件路径"
+            required
+            value={input}
+            onInput={(event) => setInput(event.currentTarget.value)}
+            placeholder="仓库相对路径"
+          />
+          {tab === 'selection' && (
+            <>
+              <label>
+                起始行
+                <input
+                  type="number"
+                  aria-label="选区起始行"
+                  min={1}
+                  value={startLine}
+                  onInput={(event) =>
+                    setStartLine(Math.max(1, Number(event.currentTarget.value) || 1))
+                  }
+                />
+              </label>
+              <label>
+                结束行
+                <input
+                  type="number"
+                  aria-label="选区结束行"
+                  min={startLine}
+                  value={endLine}
+                  onInput={(event) =>
+                    setEndLine(Math.max(startLine, Number(event.currentTarget.value) || startLine))
+                  }
+                />
+              </label>
+            </>
+          )}
+          <button>读取文件</button>
+          <button
+            type="button"
+            onClick={() => {
+              setRevision(null);
+              setOffset(0);
+            }}
+          >
+            查看当前工作区
+          </button>
+        </form>
+      ) : (
+        <div class="modal-actions">
+          <label>
+            提交 Revision
+            <input
+              aria-label="文件树提交 Revision"
+              value={treeRevisionInput}
+              onInput={(event) => setTreeRevisionInput(event.currentTarget.value)}
+              placeholder="HEAD、分支名或提交 SHA"
+            />
+          </label>
+          <label>
+            过滤文件路径
+            <input
+              aria-label="过滤提交文件树"
+              value={treeFilter}
+              onInput={(event) => setTreeFilter(event.currentTarget.value)}
+              placeholder="输入文件名或目录筛选…"
+            />
+          </label>
+        </div>
+      )}
       <div class="modal-actions">
         <button
           aria-pressed={tab === 'history'}
@@ -143,33 +238,55 @@ export function FileHistoryDialog({
           Blame
         </button>
         <button
-          disabled={busy || offset === 0}
-          onClick={() => setOffset(Math.max(0, offset - pageSize))}
+          aria-pressed={tab === 'selection'}
+          onClick={() => {
+            setTab('selection');
+            setOffset(0);
+          }}
         >
-          上一页
+          代码选区历史 (git log -L)
         </button>
         <button
-          disabled={busy || !(tab === 'history' ? history?.hasMore : blame?.hasMore)}
-          onClick={() => setOffset(offset + pageSize)}
+          aria-pressed={tab === 'tree'}
+          onClick={() => {
+            setTab('tree');
+            setOffset(0);
+          }}
         >
-          下一页
+          浏览提交文件树
         </button>
-        <span>{busy ? '读取中…' : `第 ${Math.floor(offset / pageSize) + 1} 页`}</span>
+        {(tab === 'history' || tab === 'blame') && (
+          <>
+            <button
+              disabled={busy || offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - pageSize))}
+            >
+              上一页
+            </button>
+            <button
+              disabled={busy || !(tab === 'history' ? history?.hasMore : blame?.hasMore)}
+              onClick={() => setOffset(offset + pageSize)}
+            >
+              下一页
+            </button>
+            <span>{busy ? '读取中…' : `第 ${Math.floor(offset / pageSize) + 1} 页`}</span>
+          </>
+        )}
       </div>
       {error && (
         <p class="error-text" role="alert">
           {error}
         </p>
       )}
-      {tab === 'history' && (
+      {(tab === 'history' || tab === 'selection') && (
         <div class="hunk-list">
           {before && (
             <p>
               比较起点 · {before.commit.hash.slice(0, 8)} · {before.path}
             </p>
           )}
-          {!busy && history?.entries.length === 0 && <p>此路径没有提交历史。</p>}
-          {history?.entries.map((entry) => (
+          {!busy && activeHistory?.entries.length === 0 && <p>此路径或行范围没有提交历史。</p>}
+          {activeHistory?.entries.map((entry) => (
             <section class="hunk-item" key={entry.commit.hash}>
               <div>
                 <code>{entry.commit.hash.slice(0, 8)}</code> {entry.commit.subject} ·{' '}
@@ -227,6 +344,49 @@ export function FileHistoryDialog({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {tab === 'tree' && (
+        <div class="hunk-list" aria-label="提交文件树列表">
+          <p class="muted">
+            提交 <code>{revisionTree?.revision.slice(0, 12) ?? treeRevisionInput}</code> 共{' '}
+            {filteredTreeEntries.length} 个匹配文件
+            {revisionTree?.truncated ? '（已截断前 10,000 个文件）' : ''}
+          </p>
+          {filteredTreeEntries.slice(0, 300).map((item) => (
+            <section class="hunk-item" key={item.path}>
+              <div>
+                <strong>{item.path}</strong>{' '}
+                <small class="muted">
+                  ({item.size} B · {item.objectHash.slice(0, 8)})
+                </small>
+              </div>
+              <div class="modal-actions">
+                <button
+                  onClick={() =>
+                    setTarget({
+                      path: item.path,
+                      oldPath: null,
+                      revision: revisionTree?.revision ?? treeRevisionInput,
+                      beforeRevision: revisionTree?.revision ?? treeRevisionInput,
+                    })
+                  }
+                >
+                  预览该版本内容
+                </button>
+                <button
+                  onClick={() => {
+                    setInput(item.path);
+                    setPath(item.path);
+                    setRevision(revisionTree?.revision ?? null);
+                    setTab('history');
+                  }}
+                >
+                  查看此文件历史
+                </button>
+              </div>
+            </section>
+          ))}
         </div>
       )}
       {target && (

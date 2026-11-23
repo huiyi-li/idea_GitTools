@@ -1166,6 +1166,42 @@ async fn file_blame(
         .await
 }
 
+#[tauri::command]
+async fn selection_history(
+    root: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    revision: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<git::file_history::FileHistory, String> {
+    active(&*state.0.lock().await, &root)?
+        .selection_history(&path, start_line, end_line, revision.as_deref())
+        .await
+}
+
+#[tauri::command]
+async fn revision_tree(
+    root: String,
+    revision: String,
+    state: State<'_, AppState>,
+) -> Result<git::file_history::RevisionTree, String> {
+    active(&*state.0.lock().await, &root)?
+        .revision_tree(&revision)
+        .await
+}
+
+#[tauri::command]
+async fn edit_commit_changes_in_memory(
+    root: String,
+    request: git::file_history::InMemoryCommitEditRequest,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    active(&*state.0.lock().await, &root)?
+        .edit_commit_changes_in_memory(request)
+        .await
+}
+
 #[derive(serde::Serialize)]
 struct ReviewFetch {
     id: String,
@@ -1262,6 +1298,9 @@ pub fn run() {
             start_interactive,
             file_history,
             file_blame,
+            selection_history,
+            revision_tree,
+            edit_commit_changes_in_memory,
             fetch_review_branch,
             initial_repository,
             discover_workspace,

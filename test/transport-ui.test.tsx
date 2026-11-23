@@ -1057,3 +1057,45 @@ test('push rejection offers one-click Update Project (Auto-Shelf + Rebase) and r
     render(null, host);
   }
 });
+
+test('FileHistoryDialog supports selection history (git log -L) and browsing repository tree at revision', async () => {
+  const calls: { command: string; args: any }[] = [];
+  (globalThis as any).testBackend = async (command: string, args: any) => {
+    calls.push({ command, args });
+    if (command === 'file_history' || command === 'selection_history') {
+      return {
+        revision: head,
+        entries: [{ commit, path: 'src/main.ts', oldPath: null }],
+        hasMore: false,
+      };
+    }
+    if (command === 'revision_tree') {
+      return {
+        revision: head,
+        entries: [
+          { path: 'src/main.ts', mode: '100644', objectHash: head, size: 128 },
+          { path: 'README.md', mode: '100644', objectHash: head, size: 64 },
+        ],
+        truncated: false,
+      };
+    }
+    throw Error(command);
+  };
+  render(<FileHistoryDialog root="C:/repo" initialPath="src/main.ts" onClose={() => {}} />, host);
+  try {
+    await waitFor(() => calls.some((c) => c.command === 'file_history'));
+    button('代码选区历史 (git log -L)').click();
+    await waitFor(() => calls.some((c) => c.command === 'selection_history'));
+    const selCall = calls.find((c) => c.command === 'selection_history')!;
+    assert.equal(selCall.args.path, 'src/main.ts');
+    assert.equal(selCall.args.startLine, 1);
+    assert.equal(selCall.args.endLine, 20);
+
+    button('浏览提交文件树').click();
+    await waitFor(() => host.textContent?.includes('README.md'));
+    input('过滤提交文件树', 'README');
+    await waitFor(() => !host.textContent?.includes('src/main.ts') && host.textContent?.includes('README.md'));
+  } finally {
+    render(null, host);
+  }
+});
