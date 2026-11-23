@@ -1,13 +1,165 @@
-import { RangeSetBuilder } from '@codemirror/state';
+import { EditorSelection, RangeSetBuilder, type Extension } from '@codemirror/state';
 import {
   Decoration,
+  EditorView,
   ViewPlugin,
+  drawSelection,
+  highlightActiveLine,
+  highlightActiveLineGutter,
   type DecorationSet,
-  type EditorView,
   type ViewUpdate,
 } from '@codemirror/view';
 import { buildChanges } from '../shared/intellijDiff';
 import { minimapRanges } from './minimap';
+
+export interface CursorPositionInfo {
+  line: number;
+  col: number;
+  selectedChars: number;
+  selectedLines: number;
+  pos: number;
+}
+
+export function jumpToEditorLine(view: EditorView, lineNumber: number, column = 1) {
+  const safeLine = Math.max(1, Math.min(view.state.doc.lines, Math.floor(lineNumber) || 1));
+  const lineObj = view.state.doc.line(safeLine);
+  const safeCol = Math.max(1, Math.min(lineObj.length + 1, Math.floor(column) || 1));
+  const pos = lineObj.from + safeCol - 1;
+  view.dispatch({
+    selection: { anchor: pos, head: pos },
+    effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+  });
+  view.contentDOM.focus({ preventScroll: true });
+}
+
+function resolveClickPos(view: EditorView, event: MouseEvent): number | null {
+  const coordPos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (coordPos !== null) return coordPos;
+  if (event.target instanceof Node && view.contentDOM.contains(event.target)) {
+    try {
+      return view.posAtDOM(event.target, 0);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function previewCursorSupport(
+  onCursorChange?: (info: CursorPositionInfo) => void,
+): Extension {
+  return [
+    drawSelection({ cursorBlinkRate: 1100, drawRangeCursor: true }),
+    highlightActiveLine(),
+    highlightActiveLineGutter(),
+    EditorView.domEventHandlers({
+      mousedown(event, view) {
+        if (event.button !== 0) return false;
+        // Clicking a gutter line number jumps the cursor directly to that line
+        const targetEl = event.target instanceof HTMLElement ? event.target : null;
+        const gutterEl = targetEl?.closest('.cm-lineNumbers .cm-gutterElement');
+        if (gutterEl) {
+          const lineNum = Number(gutterEl.textContent?.trim());
+          if (Number.isInteger(lineNum) && lineNum >= 1 && lineNum <= view.state.doc.lines) {
+            const lineObj = view.state.doc.line(lineNum);
+            view.contentDOM.focus({ preventScroll: true });
+            view.dispatch({
+              selection: { anchor: lineObj.from, head: lineObj.to },
+            });
+            event.preventDefault();
+            return true;
+          }
+        }
+        // In read-only preview mode (contenteditable="false"), enable click-to-place-cursor and drag-to-select
+        if (!view.state.facet(EditorView.editable)) {
+          const pos = resolveClickPos(view, event);
+          view.contentDOM.focus({ preventScroll: true });
+          if (pos !== null) {
+            const anchor = event.shiftKey ? view.state.selection.main.anchor : pos;
+            view.dispatch({
+              selection: EditorSelection.single(anchor, pos),
+            });
+            const onMove = (moveEvent: MouseEvent) => {
+              if ((moveEvent.buttons & 1) === 0) {
+                cleanup();
+                return;
+              }
+              const nextPos = resolveClickPos(view, moveEvent);
+              if (nextPos !== null) {
+                view.dispatch({
+                  selection: EditorSelection.single(anchor, nextPos),
+                });
+              }
+            };
+            const cleanup = () => {
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', cleanup);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', cleanup);
+          }
+        }
+        return false;
+      },
+      keydown(event, view) {
+        if (view.state.facet(EditorView.editable)) return false;
+        const sel = view.state.selection.main;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && !sel.empty) {
+          void navigator.clipboard?.writeText(view.state.sliceDoc(sel.from, sel.to)).catch(() => {});
+          return true;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+          event.preventDefault();
+          view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+          return true;
+        }
+        if (
+          ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+        ) {
+          event.preventDefault();
+          const line = view.state.doc.lineAt(sel.head);
+          const colOffset = sel.head - line.from;
+          let nextHead = sel.head;
+          if (event.key === 'ArrowLeft') nextHead = Math.max(0, sel.head - 1);
+          else if (event.key === 'ArrowRight') nextHead = Math.min(view.state.doc.length, sel.head + 1);
+          else if (event.key === 'Home') nextHead = line.from;
+          else if (event.key === 'End') nextHead = line.to;
+          else if (event.key === 'ArrowUp' && line.number > 1) {
+            const prev = view.state.doc.line(line.number - 1);
+            nextHead = Math.min(prev.to, prev.from + colOffset);
+          } else if (event.key === 'ArrowDown' && line.number < view.state.doc.lines) {
+            const next = view.state.doc.line(line.number + 1);
+            nextHead = Math.min(next.to, next.from + colOffset);
+          }
+          view.dispatch({
+            selection: EditorSelection.single(event.shiftKey ? sel.anchor : nextHead, nextHead),
+            effects: EditorView.scrollIntoView(nextHead),
+          });
+          return true;
+        }
+        return false;
+      },
+    }),
+    EditorView.updateListener.of((update) => {
+      if (
+        onCursorChange &&
+        (update.selectionSet || update.docChanged || update.focusChanged)
+      ) {
+        const sel = update.state.selection.main;
+        const headLine = update.state.doc.lineAt(sel.head);
+        const startLine = update.state.doc.lineAt(sel.from).number;
+        const endLine = update.state.doc.lineAt(sel.to).number;
+        onCursorChange({
+          line: headLine.number,
+          col: sel.head - headLine.from + 1,
+          selectedChars: sel.to - sel.from,
+          selectedLines: sel.empty ? 0 : endLine - startLine + 1,
+          pos: sel.head,
+        });
+      }
+    }),
+  ];
+}
 
 function tokenizeLine(text: string): string[] {
   return text.match(/\w+|\s+|[^\w\s]/g) ?? [];

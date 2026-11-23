@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Split, ToolButton } from '../ui/controls';
+import { type CursorPositionInfo } from '../ui/diff-highlights';
 import { useMinimapPreference } from '../ui/editor-preferences';
 import { ReviewController } from './controller';
 import {
@@ -30,6 +31,14 @@ export function ReviewEditors({
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cursorInfo, setCursorInfo] = useState<CursorPositionInfo>({
+    line: 1,
+    col: 1,
+    selectedChars: 0,
+    selectedLines: 0,
+    pos: 0,
+  });
+  const [jumpLineInput, setJumpLineInput] = useState('1');
   const baseTextRef = useRef(document.current.file.text.replace(/\r\n/g, '\n'));
   baseTextRef.current = document.current.file.text.replace(/\r\n/g, '\n');
   const draftRef = useRef(baseTextRef.current);
@@ -80,6 +89,10 @@ export function ReviewEditors({
         setDirty(nextDirty);
       },
       () => void saveCurrentEdit(),
+      (info) => {
+        setCursorInfo(info);
+        setJumpLineInput(String(info.line));
+      },
     );
     view.setSync(preferences.current.sync);
     view.setCurrentEditable(editing && canEditCurrent);
@@ -153,7 +166,13 @@ export function ReviewEditors({
       {snapshots[pane].state === 'text' && !snapshots[pane].text && (
         <div class="review-snapshot-note">空文件</div>
       )}
-      <div class="review-editor-host" ref={{ before, after, current }[pane]} />
+      <div
+        class={
+          'review-editor-host' +
+          (pane === 'current' && editing && canEditCurrent ? ' is-editing-pane' : '')
+        }
+        ref={{ before, after, current }[pane]}
+      />
     </section>
   );
   return (
@@ -214,7 +233,35 @@ export function ReviewEditors({
         </label>
         {canEditCurrent && (
           <div class="diff-edit-tools">
-            <label title="直接在右侧当前工作区栏微调代码并按 Ctrl+S 保存">
+            <span
+              class="diff-cursor-badge"
+              aria-label="当前工作区光标位置"
+              title="点击右侧当前工作区代码或行号即可在预览/编辑模式下定位光标与选区"
+            >
+              行 {cursorInfo.line}, 列 {cursorInfo.col}
+              {cursorInfo.selectedChars > 0
+                ? ` · 已选 ${cursorInfo.selectedChars} 字符`
+                : ''}
+            </span>
+            <input
+              type="number"
+              class="diff-jump-input"
+              aria-label="跳转到当前工作区行号"
+              min={1}
+              value={jumpLineInput}
+              placeholder="跳至行"
+              title="输入行号并回车定位当前工作区光标"
+              onInput={(event) => setJumpLineInput(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  controller.current?.jumpToCurrentLine(
+                    Number(event.currentTarget.value) || Number(jumpLineInput) || 1,
+                  );
+                }
+              }}
+            />
+            <label title="保留当前预览光标位置，直接在右侧当前工作区栏微调代码并按 Ctrl+S 保存">
               <input
                 type="checkbox"
                 checked={editing}

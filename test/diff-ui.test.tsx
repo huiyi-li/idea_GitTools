@@ -268,6 +268,16 @@ test('worktree diff supports lightweight editing, word highlights, revert and at
     await waitFor(() =>
       [...root.querySelectorAll('label')].some((node) => node.textContent?.includes('轻量编辑')),
     );
+    // Jump preview cursor to line 2 before enabling lightweight edit, and verify cursor position badge & preservation
+    const jumpInput = root.querySelector<HTMLInputElement>('[aria-label="跳转到工作区行号"]')!;
+    assert.ok(jumpInput);
+    jumpInput.value = '2';
+    jumpInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    jumpInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await waitFor(() =>
+      root.querySelector('[aria-label="工作区光标位置"]')?.textContent?.includes('行 2, 列 1'),
+    );
+
     const editLabel = [...root.querySelectorAll('label')].find((node) =>
       node.textContent?.includes('轻量编辑'),
     )!;
@@ -279,6 +289,8 @@ test('worktree diff supports lightweight editing, word highlights, revert and at
     const rightView = EditorView.findFromDOM(
       root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement,
     )!;
+    // Cursor position on line 2 was preserved when entering lightweight edit mode
+    assert.equal(rightView.state.doc.lineAt(rightView.state.selection.main.head).number, 2);
     rightView.dispatch({
       changes: { from: 0, to: rightView.state.doc.length, insert: 'const count = 3;\nconst stay = true;\n' },
     });

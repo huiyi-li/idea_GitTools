@@ -1079,6 +1079,69 @@ input[type='checkbox'] {
   font-size: 11px;
   border-radius: 3px;
 }
+.diff-cursor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg);
+  font-size: 11px;
+  font-family: Consolas, monospace;
+}
+.diff-jump-input {
+  width: 52px;
+  height: 20px;
+  padding: 0 4px;
+  font-size: 11px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border-control);
+}
+.is-editing-pane {
+  box-shadow: inset 0 0 0 1px #56a8f5;
+}
+.cm-editor,
+.cm-scroller,
+.cm-content,
+.cm-line {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+.cm-content {
+  cursor: text;
+  caret-color: #56a8f5;
+}
+.cm-lineNumbers .cm-gutterElement {
+  cursor: pointer;
+}
+.cm-editor .cm-cursor,
+.cm-editor .cm-dropCursor {
+  border-left: 2px solid #56a8f5 !important;
+  margin-left: -1px;
+}
+.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor {
+  display: block !important;
+}
+.cm-editor .cm-activeLine {
+  background-color: rgba(86, 168, 245, 0.12);
+}
+.cm-editor.cm-focused .cm-activeLine {
+  background-color: rgba(86, 168, 245, 0.22);
+  box-shadow: inset 2px 0 0 #56a8f5;
+}
+.cm-editor .cm-activeLineGutter {
+  background-color: rgba(86, 168, 245, 0.18) !important;
+  color: var(--fg) !important;
+  font-weight: 600;
+}
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background-color: rgba(53, 116, 240, 0.36) !important;
+}
 .line-added {
   background: #4f9c4930;
 }

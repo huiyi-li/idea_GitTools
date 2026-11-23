@@ -1,5 +1,5 @@
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
-import { EditorView, drawSelection, keymap, lineNumbers } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { LanguageDescription } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
@@ -7,7 +7,12 @@ import { syntaxTheme } from '../merge/theme';
 import { buildChanges } from '../shared/intellijDiff';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from '../ui/minimap';
 import { lineAnchors, mapLine, type LineAnchors } from './line-map';
-import { diffLineHighlights } from '../ui/diff-highlights';
+import {
+  diffLineHighlights,
+  jumpToEditorLine,
+  previewCursorSupport,
+  type CursorPositionInfo,
+} from '../ui/diff-highlights';
 import {
   readable,
   type CommitReview,
@@ -67,6 +72,7 @@ export class ReviewController {
     private readonly onNavigate: (index: number) => void,
     private readonly onCurrentChange?: (text: string) => void,
     private readonly onSaveShortcut?: () => void,
+    private readonly onCurrentCursor?: (info: CursorPositionInfo) => void,
   ) {
     this.current = document.current.file;
     this.diffs = diffs;
@@ -145,7 +151,7 @@ export class ReviewController {
       doc: snapshot.text.replace(/\r\n/g, '\n'),
       extensions: [
         lineNumbers(),
-        drawSelection(),
+        previewCursorSupport(isCurrent ? this.onCurrentCursor : undefined),
         keymap.of(defaultKeymap),
         theme,
         ...(isCurrent
@@ -201,10 +207,37 @@ export class ReviewController {
     const view = this.views.current;
     if (!view) return;
     const allow = editable && this.current.state === 'text';
+    const savedSelection = view.state.selection;
     view.dispatch({
       effects: this.currentEdit.reconfigure(this.currentEditExtensions(allow)),
     });
-    if (allow) view.focus();
+    if (allow) {
+      const currentChanges = this.diffs.current?.changes ?? [];
+      if (savedSelection.main.head === 0 && savedSelection.main.empty && currentChanges.length > 0) {
+        const targetIdx = Math.max(0, Math.min(currentChanges.length - 1, this.index));
+        const targetChange = currentChanges[targetIdx] ?? currentChanges[0];
+        const targetLine = Math.max(
+          1,
+          Math.min(view.state.doc.lines, (targetChange?.line1 ?? 0) + 1),
+        );
+        const linePos = view.state.doc.line(targetLine).from;
+        view.dispatch({
+          selection: { anchor: linePos, head: linePos },
+          effects: EditorView.scrollIntoView(linePos, { y: 'center' }),
+        });
+      } else {
+        view.dispatch({
+          selection: savedSelection,
+          effects: EditorView.scrollIntoView(savedSelection.main.head),
+        });
+      }
+      view.contentDOM.focus({ preventScroll: true });
+    }
+  }
+
+  jumpToCurrentLine(lineNumber: number) {
+    const view = this.views.current;
+    if (view) jumpToEditorLine(view, lineNumber);
   }
 
   resetCurrentText() {

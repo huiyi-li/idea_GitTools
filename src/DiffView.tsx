@@ -12,7 +12,12 @@ import { buildChanges } from './shared/intellijDiff';
 import { ToolButton } from './ui/controls';
 import { useMinimapPreference } from './ui/editor-preferences';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from './ui/minimap';
-import { diffLineHighlights } from './ui/diff-highlights';
+import {
+  diffLineHighlights,
+  jumpToEditorLine,
+  previewCursorSupport,
+  type CursorPositionInfo,
+} from './ui/diff-highlights';
 
 class BlameWidget extends WidgetType {
   constructor(private readonly line: BlameLine) { super(); }
@@ -104,6 +109,14 @@ export function DiffEditors({
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cursorInfo, setCursorInfo] = useState<CursorPositionInfo>({
+    line: 1,
+    col: 1,
+    selectedChars: 0,
+    selectedLines: 0,
+    pos: 0,
+  });
+  const [jumpLineInput, setJumpLineInput] = useState('1');
   const [currentChange, setCurrentChange] = useState(0);
   const [changeCount, setChangeCount] = useState(data.changes.length);
   const liveChanges = useRef(data.changes);
@@ -209,12 +222,18 @@ export function DiffEditors({
     const rightView = views.current[1];
     if (!rightView) return;
     const allowEdit = Boolean(canEdit && editing);
+    const savedSelection = rightView.state.selection;
     rightView.dispatch({
       effects: editMode.current.reconfigure(
         allowEdit
           ? [
               EditorState.readOnly.of(false),
               EditorView.editable.of(true),
+              EditorView.contentAttributes.of({
+                tabindex: '0',
+                'aria-label': '工作区代码编辑器',
+                'aria-readonly': 'false',
+              }),
               history(),
               keymap.of([
                 ...historyKeymap,
@@ -227,10 +246,38 @@ export function DiffEditors({
                 },
               ]),
             ]
-          : [EditorState.readOnly.of(true), EditorView.editable.of(false)],
+          : [
+              EditorState.readOnly.of(true),
+              EditorView.editable.of(false),
+              EditorView.contentAttributes.of({
+                tabindex: '0',
+                'aria-label': '工作区代码预览',
+                'aria-readonly': 'true',
+              }),
+            ],
       ),
     });
-    if (allowEdit) rightView.focus();
+    if (allowEdit) {
+      if (savedSelection.main.head === 0 && savedSelection.main.empty && liveChanges.current.length > 0) {
+        const targetChange =
+          liveChanges.current[changeIndexRef.current] ?? liveChanges.current[0];
+        const targetLine = Math.max(
+          1,
+          Math.min(rightView.state.doc.lines, (targetChange?.line1 ?? 0) + 1),
+        );
+        const linePos = rightView.state.doc.line(targetLine).from;
+        rightView.dispatch({
+          selection: { anchor: linePos, head: linePos },
+          effects: EditorView.scrollIntoView(linePos, { y: 'center' }),
+        });
+      } else {
+        rightView.dispatch({
+          selection: savedSelection,
+          effects: EditorView.scrollIntoView(savedSelection.main.head),
+        });
+      }
+      rightView.contentDOM.focus({ preventScroll: true });
+    }
   }, [canEdit, editing]);
 
   useEffect(() => {
@@ -308,8 +355,14 @@ export function DiffEditors({
       doc: before,
       extensions: [
         ...extensions,
+        previewCursorSupport(),
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
+        EditorView.contentAttributes.of({
+          tabindex: '0',
+          'aria-label': '左侧对比代码预览',
+          'aria-readonly': 'true',
+        }),
         minimapRanges.init(() => buildRanges('before', changes, beforeLines, afterLines, data.large)),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet) {
@@ -323,11 +376,20 @@ export function DiffEditors({
       doc: after,
       extensions: [
         ...extensions,
+        previewCursorSupport((info) => {
+          setCursorInfo(info);
+          setJumpLineInput(String(info.line));
+        }),
         editMode.current.of(
           allowEdit
             ? [
                 EditorState.readOnly.of(false),
                 EditorView.editable.of(true),
+                EditorView.contentAttributes.of({
+                  tabindex: '0',
+                  'aria-label': '工作区代码编辑器',
+                  'aria-readonly': 'false',
+                }),
                 history(),
                 keymap.of([
                   ...historyKeymap,
@@ -340,7 +402,15 @@ export function DiffEditors({
                   },
                 ]),
               ]
-            : [EditorState.readOnly.of(true), EditorView.editable.of(false)],
+            : [
+                EditorState.readOnly.of(true),
+                EditorView.editable.of(false),
+                EditorView.contentAttributes.of({
+                  tabindex: '0',
+                  'aria-label': '工作区代码预览',
+                  'aria-readonly': 'true',
+                }),
+              ],
         ),
         blameMode.current.of(
           blameLines.current.length ? EditorView.decorations.of(buildBlameDecorations(after, blameLines.current)) : [],
@@ -487,7 +557,39 @@ export function DiffEditors({
         </label>
         {canEdit && (
           <div class="diff-edit-tools">
-            <label title="直接在右侧工作区视图中微调代码并按 Ctrl+S 保存">
+            <span
+              class="diff-cursor-badge"
+              aria-label="工作区光标位置"
+              title="点击代码区或行号即可在预览/编辑模式下定位光标与选区"
+            >
+              行 {cursorInfo.line}, 列 {cursorInfo.col}
+              {cursorInfo.selectedChars > 0
+                ? ` · 已选 ${cursorInfo.selectedChars} 字符`
+                : ''}
+            </span>
+            <input
+              type="number"
+              class="diff-jump-input"
+              aria-label="跳转到工作区行号"
+              min={1}
+              value={jumpLineInput}
+              placeholder="跳至行"
+              title="输入行号并回车定位工作区光标"
+              onInput={(event) => setJumpLineInput(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  const rightView = views.current[1];
+                  if (rightView) {
+                    jumpToEditorLine(
+                      rightView,
+                      Number(event.currentTarget.value) || Number(jumpLineInput) || 1,
+                    );
+                  }
+                }
+              }}
+            />
+            <label title="保留当前预览光标位置，直接在右侧工作区视图中微调代码并按 Ctrl+S 保存">
               <input
                 type="checkbox"
                 checked={editing}
@@ -529,7 +631,7 @@ export function DiffEditors({
       )}
       <div class="diff-editors">
         <div ref={left} />
-        <div ref={right} />
+        <div ref={right} class={editing && canEdit ? 'is-editing-pane' : ''} />
       </div>
     </>
   );
