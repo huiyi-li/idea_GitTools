@@ -11,6 +11,7 @@ import { syntaxTheme } from './merge/theme';
 import { buildChanges } from './shared/intellijDiff';
 import { ToolButton } from './ui/controls';
 import { useMinimapPreference } from './ui/editor-preferences';
+import { getSetting, useSetting } from './state/settings';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from './ui/minimap';
 import {
   diffLineHighlights,
@@ -104,7 +105,7 @@ export function DiffEditors({
   selection.current = onLineSelect;
   const left = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
-  const [sync, setSync] = useState(true);
+  const [sync, setSync] = useState(() => getSetting('diffSyncScroll'));
   const [minimap, setMinimap] = useMinimapPreference();
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -310,8 +311,17 @@ export function DiffEditors({
     const dark = document.body.classList.contains('ij-dark');
     const theme = EditorView.theme(
       {
-        '&': { height: '100%', fontSize: '12px', backgroundColor: 'var(--bg-editor)', color: 'var(--fg)' },
-        '.cm-scroller': { fontFamily: 'Consolas, monospace', overflow: 'auto' },
+        '&': {
+          height: '100%',
+          fontSize: 'var(--editor-font-size, 12px)',
+          backgroundColor: 'var(--bg-editor)',
+          color: 'var(--fg)',
+        },
+        '.cm-scroller': {
+          fontFamily: 'Consolas, monospace',
+          lineHeight: 'var(--editor-line-height, 20px)',
+          overflow: 'auto',
+        },
         '.cm-gutters': {
           backgroundColor: 'var(--bg)',
           color: 'var(--fg-secondary)',
@@ -690,7 +700,7 @@ export function DiffView({
   const [phase, setPhase] = useState('');
   const [allowedKey, setAllowedKey] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [showBlame, setShowBlame] = useState(() => readSaved<boolean>('diff.inlineBlame', false) === true);
+  const [showBlame, setShowBlame] = useSetting('inlineBlame');
   const [blame, setBlame] = useState<BlameLine[]>([]);
   const selectedLine = useRef<number>(1);
   const allowLarge = allowedKey === key;
@@ -702,10 +712,6 @@ export function DiffView({
     },
     [root],
   );
-
-  useEffect(() => {
-    save('diff.inlineBlame', showBlame);
-  }, [showBlame]);
 
   useEffect(() => {
     let current = true;

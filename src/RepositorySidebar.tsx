@@ -1,6 +1,6 @@
-import { useState } from 'preact/hooks';
-import { useEffect } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { readSaved, save, type Branch, type Status } from './api';
+import { useSetting } from './state/settings';
 import { ActionMenu, Icon, ToolButton } from './ui/controls';
 
 export type BranchAction = 'compare' | 'merge' | 'merge-ff-only' | 'merge-no-ff' | 'merge-squash' | 'rebase';
@@ -39,7 +39,7 @@ export function RepositorySidebar({
   onEdit: (branch: Branch, action: 'rename' | 'delete') => void;
 }) {
   const [search, setSearch] = useState('');
-  const [groupByDir, setGroupByDir] = useState(() => readSaved<boolean>('branch.groupByDir', false) === true);
+  const [groupByDir, setGroupByDir] = useSetting('groupBranchesByDir');
   const [context, setContext] = useState<{ branch: string; point: { x: number; y: number } }>();
   const [stashContext, setStashContext] = useState<{ reference: string; point: { x: number; y: number } }>();
   const [favorites, setFavorites] = useState<string[]>(() => readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
@@ -47,9 +47,7 @@ export function RepositorySidebar({
     setFavorites(readSaved<string[]>(`branch.favorites.${status.repository.root}`, []));
   }, [status.repository.root]);
   function toggleGroupByDir() {
-    const next = !groupByDir;
-    setGroupByDir(next);
-    try { save('branch.groupByDir', next); } catch { /* Keep session state */ }
+    setGroupByDir(!groupByDir);
   }
   function toggleFavorite(full: string) {
     const next = favorites.includes(full) ? favorites.filter((item) => item !== full) : [...favorites, full];

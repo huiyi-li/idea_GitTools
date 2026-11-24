@@ -16,6 +16,8 @@ const { DiagnosticsDialog } = await import('../src/DiagnosticsDialog');
 const { Modal } = await import('../src/ui/controls');
 const { LocalHistoryDialog } = await import('../src/LocalHistoryDialog');
 const { MultiRepositoryDialog } = await import('../src/MultiRepositoryDialog');
+const { SettingsModal } = await import('../src/SettingsModal');
+const { getSetting, resetAllSettings } = await import('../src/state/settings');
 const host = document.body.appendChild(document.createElement('div'));
 afterEach(() => render(null, host));
 after(() => window.happyDOM.close());
@@ -275,4 +277,35 @@ test('modal skips disabled and hidden controls and traps keyboard focus', async 
   render(null, host);
   assert.equal(document.activeElement, trigger);
   trigger.remove();
+});
+
+test('SettingsModal persists theme, editor, workflow preferences, supports search filtering and reset', async () => {
+  localStorage.clear();
+  resetAllSettings();
+  render(<SettingsModal onClose={noClose} />, host);
+  await waitFor(() => host.textContent?.includes('界面主题'));
+  button('浅色').click();
+  await waitFor(() => getSetting('theme') === 'light');
+  assert.equal(localStorage.getItem('theme'), '"light"');
+
+  // Switch to Git Workflow section and update pull strategy
+  button('Git 工作流').click();
+  await waitFor(() => host.textContent?.includes('Update Project (Ctrl+T) 默认整合策略'));
+  button('Rebase').click();
+  await waitFor(() => getSetting('updateStrategy') === 'rebase');
+
+  // Search across sections for "Blame"
+  const search = host.querySelector<HTMLInputElement>('[aria-label="搜索设置项"]')!;
+  search.value = 'Blame';
+  search.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await waitFor(() => host.textContent?.includes('默认显示 Inline Blame'));
+  const blameSwitch = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="默认显示 Inline Blame"]')!;
+  blameSwitch.click();
+  await waitFor(() => getSetting('inlineBlame') === true);
+
+  // Reset all settings to defaults
+  button('恢复默认设置').click();
+  await waitFor(() => [...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === '确认重置'));
+  button('确认重置').click();
+  await waitFor(() => getSetting('theme') === 'dark' && getSetting('updateStrategy') === 'ff-only' && getSetting('inlineBlame') === false);
 });

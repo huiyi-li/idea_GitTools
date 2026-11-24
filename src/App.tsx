@@ -45,6 +45,8 @@ import { CompareView } from './CompareView';
 import { NavigationDialog } from './navigation/NavigationDialog';
 import { RecoveryDialog } from './navigation/RecoveryDialog';
 import { DiagnosticsDialog } from './DiagnosticsDialog';
+import { SettingsModal } from './SettingsModal';
+import { applySettingsToDocument, useSetting } from './state/settings';
 import { BisectDialog } from './BisectDialog';
 import { SubmoduleDialog } from './SubmoduleDialog';
 import type { NavigationAction, NavigationPreview, NavigationRequest, NavigationResult, OperationRecord, RecoveryOverview } from './navigation/types';
@@ -231,7 +233,12 @@ export function App() {
     const paths = readSaved<unknown>('recent', []);
     return Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string').slice(0, 8) : [];
   });
-  const [theme, setTheme] = useState(() => readSaved('theme', 'dark'));
+  const [theme] = useSetting('theme');
+  const [density] = useSetting('density');
+  const [editorFontSize] = useSetting('editorFontSize');
+  const [editorLineHeight] = useSetting('editorLineHeight');
+  const [wordDiffHighlights] = useSetting('wordDiffHighlights');
+  const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<View>('log');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -306,8 +313,8 @@ export function App() {
   const sessions = useRef(new Map<string, RepositorySession>());
   const workspaceSummaries = useWorkspaceSummaries(workspace, status);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
-  const [diffPreview, setDiffPreview] = useState(() => readSaved<boolean>('log.diffPreview', false) === true);
-  const [groupFilesByDir, setGroupFilesByDir] = useState(() => readSaved<boolean>('changes.groupByDir', false) === true);
+  const [diffPreview, setDiffPreview] = useSetting('logDiffPreview');
+  const [groupFilesByDir, setGroupFilesByDir] = useSetting('groupFilesByDir');
   const [review, setReview] = useState<{ root: string; details: Details; path: string } | null>(null);
   const [mergePath, setMergePath] = useState<string | null>(null);
   const [consoleLines, setConsoleLines] = useState<string[]>([]);
@@ -340,17 +347,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    document.body.className = theme === 'light' ? 'ij-light' : 'ij-dark';
-    save('theme', theme);
-  }, [theme]);
-
-  useEffect(() => {
-    try { save('log.diffPreview', diffPreview); } catch { /* Keep the session preference. */ }
-  }, [diffPreview]);
-
-  useEffect(() => {
-    try { save('changes.groupByDir', groupFilesByDir); } catch { /* Keep the session preference. */ }
-  }, [groupFilesByDir]);
+    const apply = () =>
+      applySettingsToDocument({
+        theme,
+        density,
+        editorFontSize,
+        editorLineHeight,
+        wordDiffHighlights,
+      });
+    apply();
+    if (theme !== 'system' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    mq.addEventListener?.('change', apply);
+    return () => mq.removeEventListener?.('change', apply);
+  }, [theme, density, editorFontSize, editorLineHeight, wordDiffHighlights]);
 
   useEffect(() => {
     let disposed = false;
@@ -969,9 +979,14 @@ export function App() {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"]')) return;
-      if (showUpdates) return;
+      if (showUpdates || showSettings) return;
       if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository) return;
-      if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review) return;
+      if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review || inMemoryEditCommit) return;
+      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+        event.preventDefault();
+        setShowSettings(true);
+        return;
+      }
       if (event.key === 'F5') {
         event.preventDefault();
         if (root) void perform('刷新', () => refresh(undefined, false, true));
@@ -1128,8 +1143,9 @@ export function App() {
           />
           <ToolButton
             icon="general/settings"
-            label="切换深浅色"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            label="设置中心 · Ctrl+,"
+            active={showSettings}
+            onClick={() => setShowSettings(true)}
           />
         </div>
       </header>
@@ -1675,9 +1691,9 @@ export function App() {
         </button>
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
-            (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
+            (showSettings || showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
               transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository || showWorkspace || mergePath !== null || review ||
-              dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null)
+              dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || inMemoryEditCommit)
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
           beforeInstall={() => {
             if (gate.current) throw new Error('Git 操作正在运行，请稍后重试。');
@@ -1698,6 +1714,7 @@ export function App() {
             }
           }} />
       </footer>
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} autoScan={!!workspace} currentRoot={root} onClose={() => setShowWorkspace(false)}
         onOpen={async (nextWorkspace, repository, depth) => {
           const success = await openPath(repository.root, false, false, true);

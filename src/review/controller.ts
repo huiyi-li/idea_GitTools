@@ -26,11 +26,15 @@ const panes: Pane[] = ['before', 'after', 'current'];
 const theme = EditorView.theme({
   '&': {
     height: '100%',
-    fontSize: '12px',
+    fontSize: 'var(--editor-font-size, 12px)',
     color: 'var(--fg)',
     backgroundColor: 'var(--bg-editor)',
   },
-  '.cm-scroller': { fontFamily: 'Consolas, monospace', lineHeight: '20px', overflow: 'auto' },
+  '.cm-scroller': {
+    fontFamily: 'Consolas, monospace',
+    lineHeight: 'var(--editor-line-height, 20px)',
+    overflow: 'auto',
+  },
   '.cm-content': { padding: '8px 0' },
   '.cm-line': { padding: '0 10px' },
   '.cm-gutters': {

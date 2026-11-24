@@ -3,6 +3,7 @@ import { createPortal } from 'preact/compat';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { version } from '../package.json';
 import { call, readSaved, save } from './api';
+import { useSetting } from './state/settings';
 import { Modal } from './ui/controls';
 import './updater.css';
 
@@ -44,8 +45,8 @@ export function UpdateManager({ open, onOpenChange, blocked, beforeInstall, onIn
   const [error, setError] = useState('');
   const [received, setReceived] = useState(0);
   const [total, setTotal] = useState<number>();
-  const [autoCheck, setAutoCheck] = useState(() => readSaved<boolean>('updater.autoCheck', true) === true);
-  const [autoDownload, setAutoDownload] = useState(() => readSaved<boolean>('updater.autoDownload', false) === true);
+  const [autoCheck, setAutoCheck] = useSetting('updaterAutoCheck');
+  const [autoDownload, setAutoDownload] = useSetting('updaterAutoDownload');
   const update = useRef<Update | null>(null);
   const working = useRef(false);
   const mounted = useRef(true);

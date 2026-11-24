@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, type Commit } from './api';
+import { getSetting } from './state/settings';
 import { Modal } from './ui/controls';
 import { TransportProgress } from './TransportDialog';
 
@@ -169,9 +170,13 @@ export function TransferDialog({
   const [branch, setBranch] = useState('');
   const [setUpstream, setSetUpstream] = useState(true);
   const [prune, setPrune] = useState(true);
-  const [rebase, setRebase] = useState(false);
-  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>('ff-only');
-  const [autoClean, setAutoClean] = useState<'shelf' | 'stash' | 'none'>('shelf');
+  const [rebase, setRebase] = useState(() => getSetting('updateStrategy') === 'rebase');
+  const [pullStrategy, setPullStrategy] = useState<'ff-only' | 'merge' | 'rebase'>(() =>
+    getSetting('updateStrategy'),
+  );
+  const [autoClean, setAutoClean] = useState<'shelf' | 'stash' | 'none'>(() =>
+    getSetting('updateAutoClean'),
+  );
   const [force, setForce] = useState(false);
   const [pushTags, setPushTags] = useState(false);
   const [noVerify, setNoVerify] = useState(false);
