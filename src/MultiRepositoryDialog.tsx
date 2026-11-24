@@ -174,10 +174,10 @@ export function MultiRepositoryDialog({
   return (
     <Modal title="多仓库" onClose={onClose} busy={busy} class="history-dialog workflow-dialog">
       <h2>多仓库同步、跨仓分支控制与聚合提交记录</h2>
-      <div class="bisect-results">
-        <button disabled={busy} aria-pressed={tab === 'sync'} onClick={() => setTab('sync')}>同步</button>
-        <button disabled={busy} aria-pressed={tab === 'branches'} onClick={() => setTab('branches')}>跨仓库同步分支</button>
-        <button disabled={busy} aria-pressed={tab === 'log'} onClick={() => setTab('log')}>提交记录</button>
+      <div class="ui-segmented" role="tablist" aria-label="多仓库功能分组">
+        <button type="button" class="ui-segmented-option" disabled={busy} aria-pressed={tab === 'sync'} aria-checked={tab === 'sync'} onClick={() => setTab('sync')}>同步</button>
+        <button type="button" class="ui-segmented-option" disabled={busy} aria-pressed={tab === 'branches'} aria-checked={tab === 'branches'} onClick={() => setTab('branches')}>跨仓库同步分支</button>
+        <button type="button" class="ui-segmented-option" disabled={busy} aria-pressed={tab === 'log'} aria-checked={tab === 'log'} onClick={() => setTab('log')}>提交记录</button>
       </div>
       <form class="modal-actions" onSubmit={event => { event.preventDefault(); addRoot(); }}>
         <input aria-label="添加仓库路径" value={newRoot} disabled={busy} onInput={event => setNewRoot(event.currentTarget.value)} placeholder="添加仓库绝对路径" />

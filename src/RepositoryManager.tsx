@@ -245,17 +245,23 @@ export function RepositoryManager({
       class="history-dialog workflow-dialog"
     >
       <h2>分支、标签与 Stash</h2>
-      <div class="modal-actions">
-        {(['branches', 'tags', 'stashes', 'shelves'] as const).map((item) => (
-          <button
-            key={item}
-            disabled={busy}
-            aria-pressed={tab === item}
-            onClick={() => setTab(item)}
-          >
-            {item === 'branches' ? '分支管理' : item === 'tags' ? '标签管理' : item === 'shelves' ? 'Shelf 管理' : 'Stash 管理'}
-          </button>
-        ))}
+      <div class="modal-actions modal-tab-bar">
+        <div class="ui-segmented" role="tablist" aria-label="仓库管理分组">
+          {(['branches', 'tags', 'stashes', 'shelves'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              class="ui-segmented-option"
+              disabled={busy}
+              aria-pressed={tab === item}
+              aria-checked={tab === item}
+              onClick={() => setTab(item)}
+            >
+              {item === 'branches' ? '分支管理' : item === 'tags' ? '标签管理' : item === 'shelves' ? 'Shelf 管理' : 'Stash 管理'}
+            </button>
+          ))}
+        </div>
+        <span class="spacer" />
         <button
           disabled={busy}
           onClick={() => void load().catch((error) => setError(String(error)))}
@@ -549,6 +555,30 @@ export function RepositoryManager({
               导入 Patch 到 Shelf…
             </button>
           </div>
+          {visibleShelves.length > 0 && (
+            <div class="shelf-card-list" aria-label="Shelf 快捷列表">
+              {visibleShelves.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={busy}
+                  class={`shelf-card-item ${selectedShelf?.id === item.id ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedShelfId(item.id);
+                    setSelectedShelfPaths([]);
+                    setPreviewShelfFile(item.files[0] ?? null);
+                    setShelfRenameText(item.name);
+                    setConfirm(false);
+                  }}
+                >
+                  <strong>{item.name}</strong>
+                  <small class="muted">
+                    {item.files.length} 个文件 · {new Date(item.timestamp).toLocaleString('zh-CN')}
+                  </small>
+                </button>
+              ))}
+            </div>
+          )}
           <label>
             {showDeletedShelves ? '回收站中的 Shelf' : '活动 Shelf'}
             <select

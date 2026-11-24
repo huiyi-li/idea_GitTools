@@ -218,43 +218,57 @@ export function FileHistoryDialog({
           </label>
         </div>
       )}
-      <div class="modal-actions">
-        <button
-          aria-pressed={tab === 'history'}
-          onClick={() => {
-            setTab('history');
-            setOffset(0);
-          }}
-        >
-          文件历史
-        </button>
-        <button
-          aria-pressed={tab === 'blame'}
-          onClick={() => {
-            setTab('blame');
-            setOffset(0);
-          }}
-        >
-          Blame
-        </button>
-        <button
-          aria-pressed={tab === 'selection'}
-          onClick={() => {
-            setTab('selection');
-            setOffset(0);
-          }}
-        >
-          代码选区历史 (git log -L)
-        </button>
-        <button
-          aria-pressed={tab === 'tree'}
-          onClick={() => {
-            setTab('tree');
-            setOffset(0);
-          }}
-        >
-          浏览提交文件树
-        </button>
+      <div class="modal-actions modal-tab-bar">
+        <div class="ui-segmented" role="tablist" aria-label="文件历史视图">
+          <button
+            type="button"
+            class="ui-segmented-option"
+            aria-pressed={tab === 'history'}
+            aria-checked={tab === 'history'}
+            onClick={() => {
+              setTab('history');
+              setOffset(0);
+            }}
+          >
+            文件历史
+          </button>
+          <button
+            type="button"
+            class="ui-segmented-option"
+            aria-pressed={tab === 'blame'}
+            aria-checked={tab === 'blame'}
+            onClick={() => {
+              setTab('blame');
+              setOffset(0);
+            }}
+          >
+            Blame
+          </button>
+          <button
+            type="button"
+            class="ui-segmented-option"
+            aria-pressed={tab === 'selection'}
+            aria-checked={tab === 'selection'}
+            onClick={() => {
+              setTab('selection');
+              setOffset(0);
+            }}
+          >
+            代码选区历史 (git log -L)
+          </button>
+          <button
+            type="button"
+            class="ui-segmented-option"
+            aria-pressed={tab === 'tree'}
+            aria-checked={tab === 'tree'}
+            onClick={() => {
+              setTab('tree');
+              setOffset(0);
+            }}
+          >
+            浏览提交文件树
+          </button>
+        </div>
         {(tab === 'history' || tab === 'blame') && (
           <>
             <button
