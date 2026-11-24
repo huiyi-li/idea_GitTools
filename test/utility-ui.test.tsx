@@ -17,6 +17,7 @@ const { Modal } = await import('../src/ui/controls');
 const { LocalHistoryDialog } = await import('../src/LocalHistoryDialog');
 const { MultiRepositoryDialog } = await import('../src/MultiRepositoryDialog');
 const { SettingsModal } = await import('../src/SettingsModal');
+const { CommandPalette } = await import('../src/CommandPalette');
 const { getSetting, resetAllSettings } = await import('../src/state/settings');
 const host = document.body.appendChild(document.createElement('div'));
 afterEach(() => render(null, host));
@@ -308,4 +309,29 @@ test('SettingsModal persists theme, editor, workflow preferences, supports searc
   await waitFor(() => [...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === '确认重置'));
   button('确认重置').click();
   await waitFor(() => getSetting('theme') === 'dark' && getSetting('updateStrategy') === 'ff-only' && getSetting('inlineBlame') === false);
+});
+
+test('CommandPalette filters commands by keyword and executes selection with Enter', async () => {
+  const ran: string[] = [];
+  let closed = 0;
+  render(
+    <CommandPalette
+      commands={[
+        { id: 'shelf', label: 'Shelf 管理', category: '储藏', keywords: 'patch unshelve', run: () => ran.push('shelf') },
+        { id: 'settings', label: '打开设置中心', category: '设置', keywords: 'theme', run: () => ran.push('settings') },
+      ]}
+      onClose={() => {
+        closed++;
+      }}
+    />,
+    host,
+  );
+  await waitFor(() => host.querySelector('[aria-label="搜索命令、工具或分支"]'));
+  const input = host.querySelector<HTMLInputElement>('[aria-label="搜索命令、工具或分支"]')!;
+  input.value = 'theme';
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await waitFor(() => host.querySelectorAll('.command-palette-item').length === 1);
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.deepEqual(ran, ['settings']);
+  assert.equal(closed, 1);
 });

@@ -46,6 +46,9 @@ import { NavigationDialog } from './navigation/NavigationDialog';
 import { RecoveryDialog } from './navigation/RecoveryDialog';
 import { DiagnosticsDialog } from './DiagnosticsDialog';
 import { SettingsModal } from './SettingsModal';
+import { CommandPalette, type PaletteCommand } from './CommandPalette';
+import { AppHeader } from './layout/AppHeader';
+import { CommitContextMenu } from './layout/CommitContextMenu';
 import { applySettingsToDocument, useSetting } from './state/settings';
 import { BisectDialog } from './BisectDialog';
 import { SubmoduleDialog } from './SubmoduleDialog';
@@ -239,6 +242,7 @@ export function App() {
   const [editorLineHeight] = useSetting('editorLineHeight');
   const [wordDiffHighlights] = useSetting('wordDiffHighlights');
   const [showSettings, setShowSettings] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [view, setView] = useState<View>('log');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -976,15 +980,57 @@ export function App() {
     return () => window.removeEventListener('focus', focus);
   }, [root]);
 
+  const hasOtherModal = Boolean(
+    showSettings ||
+      showCommandPalette ||
+      showHosting ||
+      showClone ||
+      showRemotes ||
+      showManager ||
+      showDiagnostics ||
+      showBisect ||
+      showSubmodules ||
+      branchDialog ||
+      showWorktrees ||
+      ignorePath !== null ||
+      transfer ||
+      hunks ||
+      showAmend ||
+      showInteractive ||
+      fileHistory ||
+      localHistoryPath !== null ||
+      showMultiRepository ||
+      showWorkspace ||
+      mergePath !== null ||
+      operationDialog ||
+      discard ||
+      navigation ||
+      showRecovery ||
+      revisionInput !== null ||
+      comparisonBranch !== null ||
+      review ||
+      inMemoryEditCommit ||
+      dialog,
+  );
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (document.querySelector('[aria-modal="true"]')) return;
-      if (showUpdates || showSettings) return;
-      if (showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null || transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository) return;
-      if (mergePath !== null || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || review || inMemoryEditCommit) return;
+      if (showUpdates || hasOtherModal) return;
       if ((event.ctrlKey || event.metaKey) && event.key === ',') {
         event.preventDefault();
         setShowSettings(true);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setShowCommandPalette(true);
         return;
       }
       if (event.key === 'F5') {
@@ -1011,7 +1057,56 @@ export function App() {
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, [root, view, message, mergePath, operationDialog, discard, navigation, showRecovery, revisionInput, comparisonBranch, showHosting, showClone, showRemotes, showManager, showDiagnostics, showBisect, showSubmodules, branchDialog, showWorktrees, ignorePath, transfer, hunks, showAmend, showInteractive, fileHistory, localHistoryPath, showMultiRepository, review, showUpdates]);
+  }, [root, view, message, busy, showUpdates, hasOtherModal]);
+
+  const paletteCommands: PaletteCommand[] = [
+    { id: 'settings', label: '打开设置中心', category: '界面与设置', keywords: 'settings theme font 主题 字号', shortcut: 'Ctrl+,', icon: 'general/settings', run: () => setShowSettings(true) },
+    { id: 'open-repo', label: '打开仓库 / 工作区文件夹', category: '仓库', keywords: 'open folder workspace', shortcut: 'Ctrl+O', icon: 'general/open', run: () => void chooseRepository() },
+    { id: 'workspace', label: '管理工作区多仓库', category: '仓库', keywords: 'workspace scan', icon: 'nodes/folder', run: () => { startupOpen.current = false; setShowWorkspace(true); } },
+    { id: 'clone', label: '克隆远程仓库', category: '仓库', keywords: 'clone git', icon: 'general/add', run: () => setShowClone(true) },
+    { id: 'update-project', label: '更新项目 (Pull / Auto-Shelf)', category: '远程同步', keywords: 'pull update rebase merge', shortcut: 'Ctrl+T', icon: 'vcs/update', disabled: !root || !!busy, run: () => setTransfer('pull') },
+    { id: 'fetch', label: 'Fetch 获取远程更新', category: '远程同步', keywords: 'fetch remote', icon: 'vcs/fetch', disabled: !root || !!busy, run: () => setTransfer('fetch') },
+    { id: 'push', label: 'Push 推送提交', category: '远程同步', keywords: 'push remote', icon: 'vcs/push', disabled: !root || !!busy, run: () => setTransfer('push') },
+    { id: 'refresh', label: '刷新仓库状态与日志', category: '仓库', keywords: 'refresh reload', shortcut: 'F5', icon: 'general/refresh', disabled: !root || !!busy, run: () => void perform('刷新', () => refresh(undefined, false, true)) },
+    { id: 'shelves', label: 'Shelf 管理（独立 Patch 搁置与回收站）', category: '储藏与补丁', keywords: 'shelf unshelve patch', icon: 'vcsimpl/stash', disabled: !root || !!busy, run: () => openManager('shelves') },
+    { id: 'stashes', label: 'Git Stash 储藏管理', category: '储藏与补丁', keywords: 'stash pop apply', icon: 'vcsimpl/stash', disabled: !root || !!busy, run: () => openManager('stashes') },
+    { id: 'branches', label: '分支、标签与 Stash 管理', category: '分支', keywords: 'branch tag', icon: 'dvcs/branchLabel', disabled: !root || !!busy, run: () => openManager('branches') },
+    { id: 'multi-repo', label: '多仓库同步、跨仓分支控制与聚合日志', category: '多仓库', keywords: 'multi repo sync branch', icon: 'nodes/folder', disabled: !root || !!busy, run: () => setShowMultiRepository(true) },
+    { id: 'remotes', label: '管理远程仓库 (Remotes)', category: '远程同步', keywords: 'remote origin url', icon: 'vcs/fetch', disabled: !root || !!busy, run: () => setShowRemotes(true) },
+    { id: 'worktrees', label: 'Worktree 多工作树管理', category: '仓库', keywords: 'worktree', icon: 'nodes/folder', disabled: !root || !!busy, run: () => setShowWorktrees(true) },
+    { id: 'interactive', label: '交互式 Rebase', category: '历史', keywords: 'rebase squash fixup reword', icon: 'toolwindows/vcs', disabled: !root || !!busy, run: () => { setInteractiveBase(''); setInteractiveAction(undefined); setShowInteractive(true); } },
+    { id: 'file-history', label: '文件历史、Blame 与选区演变 (git log -L)', category: '历史', keywords: 'history blame selection', icon: 'toolwindows/vcs', disabled: !root || !!busy, run: () => { setFileHistoryTab('history'); setFileHistoryRevision(target?.revision ?? null); setFileHistory(true); } },
+    { id: 'revision-tree', label: '浏览提交时刻完整仓库文件树', category: '历史', keywords: 'tree revision ls-tree', icon: 'nodes/folder', disabled: !root || !!busy, run: () => { setFileHistoryTab('tree'); setFileHistoryRevision(selected ?? status?.repository.head ?? 'HEAD'); setFileHistory(true); } },
+    { id: 'local-history', label: 'Local History 本地历史快照', category: '历史', keywords: 'local history snapshot', icon: 'toolwindows/vcs', disabled: !root || !!busy, run: () => setLocalHistoryPath('') },
+    { id: 'recovery', label: '操作恢复与 Reflog', category: '历史', keywords: 'reflog recovery', icon: 'toolwindows/vcs', disabled: !root || !!busy, run: () => setShowRecovery(true) },
+    { id: 'ignore', label: '忽略规则 (.gitignore) 管理', category: '仓库', keywords: 'gitignore ignore', icon: 'toolwindows/commit', disabled: !root || !!busy, run: () => setIgnorePath('') },
+    { id: 'diagnostics', label: 'Git 诊断信息', category: '诊断', keywords: 'diagnostics doctor', icon: 'general/settings', disabled: !root || !!busy, run: () => setShowDiagnostics(true) },
+    { id: 'bisect', label: 'Git Bisect 二分排错', category: '诊断', keywords: 'bisect', icon: 'toolwindows/vcs', disabled: !root || !!busy, run: () => setShowBisect(true) },
+    { id: 'submodules', label: 'Submodule 子模块管理', category: '仓库', keywords: 'submodule', icon: 'nodes/folder', disabled: !root || !!busy, run: () => setShowSubmodules(true) },
+    ...(status?.branches
+      .filter((b) => !b.remote && !b.current)
+      .slice(0, 12)
+      .map((b) => ({
+        id: `checkout-${b.full}`,
+        label: `切换分支：${b.name}`,
+        category: '分支切换',
+        keywords: `checkout switch branch ${b.name}`,
+        icon: 'dvcs/branchLabel',
+        disabled: !!busy || status.repository.operation !== 'none',
+        run: () => void previewNavigation(b.full),
+      })) ?? []),
+    ...recent
+      .filter((p) => p !== root)
+      .map((p) => ({
+        id: `recent-${p}`,
+        label: `切换仓库：${p.replaceAll('\\', '/').split('/').pop()}`,
+        category: '最近仓库',
+        keywords: p,
+        icon: 'nodes/folder',
+        disabled: !!busy,
+        run: () => void openPath(p),
+      })),
+  ];
 
   function changeView(next: View) {
     setView(next);
@@ -1030,125 +1125,52 @@ export function App() {
 
   return (
     <div class="desktop-app">
-      <header class="app-header">
-        <div class="brand">
-          <Icon name="toolwindows/vcs" />
-          <strong>IdeaGitTool</strong>
-        </div>
-        <span class="header-divider" />
-        <div class="repository-switcher">
-          <button
-            class="repository-picker"
-            aria-label="选择仓库文件夹"
-            onClick={() => void chooseRepository()}
-            disabled={!!busy}
-            title={root || '打开仓库 · Ctrl+O'}
-          >
-            <Icon name="nodes/folder" />
-            <span class="ellipsis">{status?.repository.name ?? '打开仓库'}</span>
-          </button>
-          <ActionMenu label="最近仓库" icon="general/chevronDown" disabled={!!busy}>
-            <div class="menu-caption">最近仓库</div>
-            {recent.map((path) => (
-              <button
-                key={path}
-                aria-label={`打开最近仓库 ${path}`}
-                disabled={path === root || !!busy}
-                title={path}
-                onClick={() => void openPath(path)}
-              >
-                <Icon name="nodes/folder" />
-                <span class="recent-repository-label">
-                  <strong class="ellipsis">{path.replaceAll('\\', '/').split('/').pop()}</strong>
-                  <small class="ellipsis muted">{path}</small>
-                </span>
-                {path === root && <span class="muted">当前</span>}
-              </button>
-            ))}
-            {!recent.length && <div class="menu-caption">暂无最近仓库</div>}
-            <hr />
-            <button disabled={!!busy} onClick={() => void chooseRepository()}>
-              <Icon name="general/open" />
-              打开其他仓库…
-            </button>
-          </ActionMenu>
-        </div>
-        {status && (
-          <span class="current-branch-chip">
-            <Icon name="dvcs/branchLabel" />
-            <span class="ellipsis">
-              {status.repository.branch ?? status.repository.head?.slice(0, 8) ?? '尚无提交'}
-            </span>
-          </span>
-        )}
-        <div class="header-actions">
-          <ToolButton icon="nodes/folder" label="打开工作区文件夹" disabled={!!busy} onClick={() => { startupOpen.current = false; setShowWorkspace(true); }}><span>工作区</span></ToolButton>
-          <ActionMenu label="仓库工具" text="仓库" disabled={!root || !!busy}>
-            <button onClick={() => setShowRemotes(true)}>管理远程仓库</button>
-            <button onClick={() => openManager('branches')}>分支、标签与 Stash</button>
-            <button onClick={() => openManager('stashes')}>储藏管理</button>
-            <button onClick={() => openManager('shelves')}>Shelf 管理</button>
-            <button onClick={() => setShowWorktrees(true)}>Worktree 管理</button>
-            <button onClick={() => setIgnorePath('')}>忽略规则管理</button>
-            <button onClick={() => { setInteractiveBase(''); setInteractiveAction(undefined); setShowInteractive(true); }}>交互式 Rebase</button>
-            <button onClick={() => { setFileHistoryTab('history'); setFileHistoryRevision(target?.revision ?? null); setFileHistory(true); }}>文件历史与 Blame</button>
-            <button onClick={() => { setFileHistoryTab('tree'); setFileHistoryRevision(selected ?? status?.repository.head ?? 'HEAD'); setFileHistory(true); }}>浏览提交时刻仓库文件树</button>
-            <button onClick={() => setLocalHistoryPath('')}>Local History</button>
-            <button onClick={() => setShowMultiRepository(true)}>批量远程同步与跨仓库记录</button>
-            <button onClick={() => setShowDiagnostics(true)}>Git 诊断</button>
-            <button onClick={() => setShowBisect(true)}>Bisect</button>
-            <button onClick={() => setShowSubmodules(true)}>Submodule 管理</button>
-          </ActionMenu>
-          <ToolButton
-            icon="general/add"
-            label="克隆仓库"
-            disabled={!!busy}
-            onClick={() => setShowClone(true)}
-          >
-            <span>克隆</span>
-          </ToolButton>
-          <ToolButton icon="vcs/update" label="签出标签或提交 SHA" disabled={!root || !!busy} onClick={() => setRevisionInput('')} />
-          <ToolButton icon="toolwindows/vcs" label="操作恢复与 Reflog" disabled={!root || !!busy} onClick={() => setShowRecovery(true)}><span>Reflog</span></ToolButton>
-          <ToolButton
-            icon="toolwindows/vcs"
-            label="托管平台 · GitHub / GitLab"
-            active={showHosting}
-            onClick={() => setShowHosting(!showHosting)}
-          >
-            <span>托管平台</span>
-          </ToolButton>
-          {(['fetch', 'pull', 'push'] as const).map((action) => (
-            <ToolButton
-              icon={action === 'fetch' ? 'vcs/fetch' : action === 'pull' ? 'vcs/update' : 'vcs/push'}
-              label={action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull · 更新项目 (Ctrl+T)' : 'Push'}
-              disabled={!root || !!busy}
-              key={action}
-              onClick={() => setTransfer(action)}
-            >
-              <span>{action === 'fetch' ? 'Fetch' : action === 'pull' ? 'Pull' : 'Push'}</span>
-            </ToolButton>
-          ))}
-          <span class="toolbar-separator" />
-          <ToolButton
-            icon="general/refresh"
-            label="刷新 · F5"
-            disabled={!root || !!busy}
-            onClick={() => void perform('刷新', () => refresh(undefined, false, true))}
-          />
-          <ToolButton
-            icon="general/open"
-            label="打开仓库 · Ctrl+O"
-            disabled={!!busy}
-            onClick={() => void chooseRepository()}
-          />
-          <ToolButton
-            icon="general/settings"
-            label="设置中心 · Ctrl+,"
-            active={showSettings}
-            onClick={() => setShowSettings(true)}
-          />
-        </div>
-      </header>
+      <AppHeader
+        root={root}
+        status={status}
+        recent={recent}
+        busy={!!busy}
+        showHosting={showHosting}
+        showSettings={showSettings}
+        onChooseRepository={() => void chooseRepository()}
+        onOpenPath={(path) => void openPath(path)}
+        onOpenWorkspace={() => {
+          startupOpen.current = false;
+          setShowWorkspace(true);
+        }}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
+        onOpenSettings={() => setShowSettings(true)}
+        onToggleHosting={() => setShowHosting(!showHosting)}
+        onOpenClone={() => setShowClone(true)}
+        onOpenRemotes={() => setShowRemotes(true)}
+        onOpenManager={(tab) => openManager(tab)}
+        onOpenWorktrees={() => setShowWorktrees(true)}
+        onOpenIgnore={() => setIgnorePath('')}
+        onOpenInteractive={() => {
+          setInteractiveBase('');
+          setInteractiveAction(undefined);
+          setShowInteractive(true);
+        }}
+        onOpenFileHistory={() => {
+          setFileHistoryTab('history');
+          setFileHistoryRevision(target?.revision ?? null);
+          setFileHistory(true);
+        }}
+        onOpenRevisionTree={() => {
+          setFileHistoryTab('tree');
+          setFileHistoryRevision(selected ?? status?.repository.head ?? 'HEAD');
+          setFileHistory(true);
+        }}
+        onOpenLocalHistory={() => setLocalHistoryPath('')}
+        onOpenMultiRepo={() => setShowMultiRepository(true)}
+        onOpenDiagnostics={() => setShowDiagnostics(true)}
+        onOpenBisect={() => setShowBisect(true)}
+        onOpenSubmodules={() => setShowSubmodules(true)}
+        onOpenRevisionInput={() => setRevisionInput('')}
+        onOpenRecovery={() => setShowRecovery(true)}
+        onOpenTransfer={(action) => setTransfer(action)}
+        onRefresh={() => void perform('刷新', () => refresh(undefined, false, true))}
+      />
 
       {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy} summaries={workspaceSummaries}
         onSelect={path => { if (path !== root) void openPath(path, false, false, true); }}
@@ -1691,9 +1713,7 @@ export function App() {
         </button>
         <UpdateManager open={showUpdates} onOpenChange={setShowUpdates}
           blocked={busy ? `正在${busy}，完成后可安装更新。` :
-            (showSettings || showHosting || showClone || showRemotes || showManager || showDiagnostics || showBisect || showSubmodules || branchDialog || showWorktrees || ignorePath !== null ||
-              transfer || hunks || showAmend || showInteractive || fileHistory || localHistoryPath !== null || showMultiRepository || showWorkspace || mergePath !== null || review ||
-              dialog || operationDialog || discard || navigation || showRecovery || revisionInput !== null || comparisonBranch !== null || inMemoryEditCommit)
+            hasOtherModal
               ? '请先完成并关闭当前操作窗口，再安装更新。' : ''}
           beforeInstall={() => {
             if (gate.current) throw new Error('Git 操作正在运行，请稍后重试。');
@@ -1715,6 +1735,9 @@ export function App() {
           }} />
       </footer>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showCommandPalette && (
+        <CommandPalette commands={paletteCommands} onClose={() => setShowCommandPalette(false)} />
+      )}
       {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} autoScan={!!workspace} currentRoot={root} onClose={() => setShowWorkspace(false)}
         onOpen={async (nextWorkspace, repository, depth) => {
           const success = await openPath(repository.root, false, false, true);
@@ -1797,130 +1820,45 @@ export function App() {
           }}
         />
       )}
-      {commitContext && <div class="action-popup commit-context-menu" role="menu" style={{ left: Math.max(8, Math.min(commitContext.x, window.innerWidth - 290)), top: Math.max(8, Math.min(commitContext.y, window.innerHeight - 150)) }}>
-        <button role="menuitem" disabled={!!busy} onClick={() => void copyCommitRevision()}>复制 Revision Number</button>
-        <button role="menuitem" disabled={!!busy} onClick={() => void saveCommitPatch()}>保存为 Patch…</button>
-        <button
-          role="menuitem"
-          disabled={!!busy || !commitContext.commit.parents[0]}
-          onClick={() => {
-            const parent = commitContext.commit.parents[0];
-            if (!parent) return;
-            setSelected(parent);
-            setCommitContext(null);
-          }}
-        >
-          跳转到父提交
-        </button>
-        <button
-          role="menuitem"
-          disabled={!!busy || !page.commits.some((commit) => commit.parents.includes(commitContext.commit.hash))}
-          onClick={() => {
-            const child = page.commits.find((commit) => commit.parents.includes(commitContext.commit.hash));
-            if (!child) return;
-            setSelected(child.hash);
-            setCommitContext(null);
-          }}
-        >
-          跳转到子提交
-        </button>
-        <hr />
-        <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash)}>签出此提交…</button>
-        <button role="menuitem" disabled={!!busy || status?.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'checkout', true)}>从此提交创建分支…</button>
-        <button role="menuitem" disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none'} onClick={() => void previewNavigation(commitContext.commit.hash, 'reset')}>重置当前分支到此提交…</button>
-        <hr />
-        <button
-          role="menuitem"
-          disabled={!!busy || !commitContext.commit.parents[0] || status?.repository.head !== commitContext.commit.hash || status.repository.operation !== 'none' || !!status.changes.length}
-          onClick={() => void previewNavigation(commitContext.commit.parents[0] ?? '', 'reset')}
-        >
-          撤销当前提交…
-        </button>
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => openInteractiveFor(commitContext.commit, 'reword')}
-        >
-          编辑提交说明…
-        </button>
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => openInteractiveFor(commitContext.commit, 'fixup')}
-        >
-          Fixup 到上一个提交…
-        </button>
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => openInteractiveFor(commitContext.commit, 'squash')}
-        >
-          Squash 到上一个提交…
-        </button>
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => openInteractiveFor(commitContext.commit, 'drop')}
-        >
-          删除此提交…
-        </button>
-        <hr />
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => {
-            const commit = commitContext.commit;
-            setCommitContext(null);
+      {commitContext && (
+        <CommitContextMenu
+          context={commitContext}
+          commits={page.commits}
+          status={status}
+          busy={!!busy}
+          historyDisabled={historyDisabled}
+          onClose={() => setCommitContext(null)}
+          onCopyRevision={() => void copyCommitRevision()}
+          onSavePatch={() => void saveCommitPatch()}
+          onSelectCommit={(hash) => setSelected(hash)}
+          onPreviewNavigation={(target, action, creating) =>
+            void previewNavigation(target, action, creating)
+          }
+          onOpenInteractive={(commit, action) => openInteractiveFor(commit, action)}
+          onCherryPick={(commit) =>
             previewHistory('cherry-pick', {
               target: commit.hash,
               hash: commit.hash,
               label: commit.subject,
               parents: commit.parents,
-            });
-          }}
-        >
-          Cherry-pick…
-        </button>
-        <button
-          role="menuitem"
-          disabled={historyDisabled}
-          onClick={() => {
-            const commit = commitContext.commit;
-            setCommitContext(null);
+            })
+          }
+          onRevert={(commit) =>
             previewHistory('revert', {
               target: commit.hash,
               hash: commit.hash,
               label: commit.subject,
               parents: commit.parents,
-            });
+            })
+          }
+          onCreateTag={(commit) => openManager('tags', undefined, commit.hash)}
+          onOpenRevisionTree={(commit) => {
+            setFileHistoryTab('tree');
+            setFileHistoryRevision(commit.hash);
+            setFileHistory(true);
           }}
-        >
-          Revert…
-        </button>
-        <button
-          role="menuitem"
-          disabled={!!busy || !status?.repository.branch || status.repository.operation !== 'none' || !!status.changes.length}
-          onClick={() => {
-            const commit = commitContext.commit;
-            setCommitContext(null);
-            setInteractiveBase(commit.parents[0] ?? '');
-            setShowInteractive(true);
-          }}
-        >
-          从此提交开始交互式 Rebase…
-        </button>
-        <button
-          role="menuitem"
-          disabled={!!busy || status?.repository.operation !== 'none'}
-          onClick={() => {
-            const commit = commitContext.commit;
-            setCommitContext(null);
-            openManager('tags', undefined, commit.hash);
-          }}
-        >
-          从此提交创建标签…
-        </button>
-      </div>}
+        />
+      )}
       {discard && <DiscardDialog preview={discard} busy={!!busy} error={discardError}
         onClose={() => setDiscard(null)} onConfirm={() => void discardChanges()}
         onReload={() => void previewDiscard(discard.paths, discard.mode)} />}

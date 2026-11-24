@@ -323,7 +323,16 @@ input[type='checkbox'] {
   color: var(--fg-error);
 }
 .notice-message {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 40;
+  max-width: min(440px, calc(100vw - 32px));
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow);
   background: var(--bg-banner-info);
+  color: var(--fg-strong);
 }
 .workspace-tabs {
   display: flex;
