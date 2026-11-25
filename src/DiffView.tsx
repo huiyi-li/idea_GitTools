@@ -89,6 +89,7 @@ export function DiffEditors({
   onToggleBlame,
   canEdit,
   onSave,
+  onDirtyChange,
 }: {
   data: PreparedDiff;
   path?: string;
@@ -99,6 +100,7 @@ export function DiffEditors({
   onToggleBlame?: (enabled: boolean) => void;
   canEdit?: boolean;
   onSave?: (content: string) => Promise<boolean>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const selection = useRef(onLineSelect);
   const inlineBlame = showBlame === true;
@@ -129,6 +131,8 @@ export function DiffEditors({
   savingRef.current = saving;
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onDirtyRef = useRef(onDirtyChange);
+  onDirtyRef.current = onDirtyChange;
   const minimapEnabled = useRef(minimap);
   minimapEnabled.current = minimap;
   const minimapMode = useRef(new Compartment());
@@ -150,6 +154,7 @@ export function DiffEditors({
       if (ok) {
         dirtyRef.current = false;
         setDirty(false);
+        onDirtyRef.current?.(false);
       }
     } finally {
       savingRef.current = false;
@@ -386,6 +391,9 @@ export function DiffEditors({
       doc: after,
       extensions: [
         ...extensions,
+        EditorState.transactionFilter.of((transaction) =>
+          transaction.docChanged && savingRef.current ? [] : transaction,
+        ),
         previewCursorSupport((info) => {
           setCursorInfo(info);
           setJumpLineInput(String(info.line));
@@ -436,6 +444,7 @@ export function DiffEditors({
             const isDirty = text !== data.after;
             dirtyRef.current = isDirty;
             setDirty(isDirty);
+            onDirtyRef.current?.(isDirty);
             if (!data.large) {
               const currentBefore = data.before.split('\n');
               const currentAfter = text.split('\n');
@@ -691,6 +700,14 @@ export function DiffView({
   const key = target
     ? JSON.stringify([root, target.path, target.oldPath, target.revision, target.beforeRevision, target.area])
     : '';
+  const saveContext = useRef({ key });
+  const draftKey = useRef('');
+  if (saveContext.current.key !== key) {
+    saveContext.current = { key };
+    draftKey.current = '';
+  }
+  const fileContext = saveContext.current;
+  useEffect(() => () => { saveContext.current = { key: '' }; }, []);
   const [loaded, setLoaded] = useState<LoadedDiff | null>(null);
   const latest = useRef(loaded);
   latest.current = loaded;
@@ -734,6 +751,10 @@ export function DiffView({
       setPhase('');
       return;
     }
+    if (draftKey.current === key) {
+      setPhase('有未保存的编辑，保存或还原后刷新');
+      return;
+    }
     const cached = cache.current.get(key);
     if (target.revision && cached?.version === version && !(allowLarge && cached.file.canLoad)) {
       cache.current.delete(key);
@@ -746,6 +767,10 @@ export function DiffView({
     setPhase('正在读取文件…');
     const publish = (entry: LoadedDiff) => {
       if (!current) return;
+      if (draftKey.current === key) {
+        setPhase('有未保存的编辑，保存或还原后刷新');
+        return;
+      }
       latest.current = entry;
       setLoaded(entry);
       setPhase('');
@@ -790,7 +815,8 @@ export function DiffView({
           analysis?.close();
           if (worker.current === analysis) worker.current = undefined;
           if (current) {
-            setError({ key, message: String(error) });
+            if (draftKey.current === key) setSaveError({ key, message: String(error) });
+            else setError({ key, message: String(error) });
             setPhase('');
           }
         }
@@ -819,6 +845,7 @@ export function DiffView({
   );
   async function handleSaveWorktree(nextContent: string): Promise<boolean> {
     if (!target || !data) return false;
+    const context = saveContext.current;
     setSaveError(null);
     try {
       await call('save_worktree_file', {
@@ -827,6 +854,7 @@ export function DiffView({
         content: nextContent,
         expected: data.file.after,
       });
+      if (saveContext.current !== context) return true;
       const updatedFile: FileDiff = { ...data.file, after: nextContent };
       const updatedPrepared: PreparedDiff | undefined = data.prepared
         ? {
@@ -843,7 +871,7 @@ export function DiffView({
       onSaved?.();
       return true;
     } catch (e) {
-      setSaveError({ key, message: String(e) });
+      if (saveContext.current === context) setSaveError({ key, message: String(e) });
       return false;
     }
   }
@@ -885,6 +913,12 @@ export function DiffView({
         onToggleBlame={setShowBlame}
         canEdit={canEdit}
         onSave={handleSaveWorktree}
+        onDirtyChange={(dirty) => {
+          if (saveContext.current !== fileContext) return;
+          const wasDirty = draftKey.current === key;
+          draftKey.current = dirty ? key : '';
+          if (wasDirty && !dirty) setAttempt(value => value + 1);
+        }}
       />
     );
 

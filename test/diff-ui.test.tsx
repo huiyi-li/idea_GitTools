@@ -63,6 +63,72 @@ function textAfter() {
   return root.querySelector('.diff-editors > div:last-child .cm-content')?.textContent ?? '';
 }
 
+test('pending saves lock edits and cannot replace a newly selected file', async () => {
+  let finishSave!: () => void;
+  let started = false;
+  const pending = new Promise<void>(resolve => { finishSave = resolve; });
+  globalThis.testBackend = async (command: string, args: any) => {
+    if (command === 'save_worktree_file') {
+      started = true;
+      return pending;
+    }
+    return { before: '', after: args.request.path, binary: false, tooLarge: false };
+  };
+  try {
+    show(target('first.txt', null));
+    await waitFor(() => textAfter().includes('first.txt'));
+    const toggle = [...root.querySelectorAll('label')].find(node => node.textContent?.includes('轻量编辑'))!.querySelector('input')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-save-btn'));
+    const editor = EditorView.findFromDOM(root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement)!;
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: 'draft' } });
+    await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+    (root.querySelector('.diff-save-btn') as HTMLButtonElement).click();
+    await waitFor(() => started);
+    editor.dispatch({ changes: { from: 0, insert: 'late typing' } });
+    assert.equal(editor.state.doc.toString(), 'draft', 'saving locks changes immediately');
+    show(target('second.txt', null));
+    await waitFor(() => textAfter().includes('second.txt'));
+    const second = root.querySelector('.diff-editors > div:last-child .cm-editor');
+    const secondToggle = [...root.querySelectorAll('label')].find(node => node.textContent?.includes('轻量编辑'))!.querySelector('input')!;
+    secondToggle.checked = true;
+    secondToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-save-btn'));
+    EditorView.findFromDOM(second as HTMLElement)!.dispatch({ changes: { from: 0, insert: 'second draft ' } });
+    finishSave();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    show(target('second.txt', null), 1);
+    await waitFor(() => root.textContent?.includes('保存或还原后刷新'));
+    assert.equal(root.querySelector('.diff-editors > div:last-child .cm-editor'), second);
+    assert.ok(textAfter().includes('second draft second.txt'));
+  } finally {
+    finishSave();
+    render(null, root);
+  }
+});
+
+test('background refresh preserves an unsaved diff draft until it is reverted', async () => {
+  let disk = 'original';
+  globalThis.testBackend = async () => ({ before: '', after: disk, binary: false, tooLarge: false });
+  try {
+    show(target('working.txt', null));
+    await waitFor(() => textAfter() === 'original');
+    const toggle = [...root.querySelectorAll('label')].find(node => node.textContent?.includes('轻量编辑'))!.querySelector('input')!;
+    toggle.checked = true;
+    toggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await waitFor(() => root.querySelector('.diff-save-btn'));
+    const editor = EditorView.findFromDOM(root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement)!;
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: 'unsaved draft' } });
+    disk = 'external change';
+    show(target('working.txt', null), 1);
+    await waitFor(() => root.textContent?.includes('保存或还原后刷新'));
+    assert.equal(editor.state.doc.toString(), 'unsaved draft');
+    (root.querySelector('.diff-revert-btn') as HTMLButtonElement).click();
+    await waitFor(() => textAfter() === 'external change');
+  } finally { render(null, root); }
+});
+
 test('unchanged refreshes preserve editors and a historical file is reused from the bounded cache', async () => {
   const calls: string[] = [];
   jobs.length = 0;
