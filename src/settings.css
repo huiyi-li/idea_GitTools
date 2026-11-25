@@ -26,13 +26,17 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--fg-strong);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.settings-search {
+.settings-modal .settings-search {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 6px;
   flex: 1;
+  min-width: 0;
   max-width: 300px;
   margin-left: auto;
   padding: 0 8px;
@@ -42,12 +46,23 @@
   border: 1px solid var(--border-control);
 }
 
-.settings-search input {
+.settings-modal .settings-search input:not([type='checkbox']) {
   border: none;
   background: transparent;
   padding: 0;
-  width: 100%;
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 100%;
   font-size: 12px;
+}
+
+.settings-modal .settings-search .ui-icon {
+  flex-shrink: 0;
+}
+
+.settings-modal .settings-search:focus-within {
+  border-color: var(--focus);
 }
 
 .settings-body {
