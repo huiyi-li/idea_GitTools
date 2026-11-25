@@ -154,6 +154,16 @@ function fixture(
       case 'open_repository':
       case 'repository_status':
         return structuredClone(status);
+      case 'workspace_repository_summary':
+        return {
+          root: args.root,
+          branch: status.repository.branch,
+          changedFiles: status.changes.length,
+          stagedFiles: status.changes.filter((c) => c.index !== ' ' && c.index !== '?').length,
+          conflicts: status.changes.filter((c) => c.conflict).length,
+        };
+      case 'close_repository':
+        return;
       case 'read_log':
         return { commits: [commit], hasMore: false };
       case 'read_worktrees':

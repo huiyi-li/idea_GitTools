@@ -22,7 +22,7 @@ import {
 import { changeListPath, readChangeLists, writeChangeLists, type ChangeListGroup } from './changelists';
 import { DiffView } from './DiffView';
 import { BackgroundHistoryCapture } from './ui/history-capture';
-import { useWorkspaceSummaries } from './ui/workspace-summaries';
+import { useRepositoryTabSummaries } from './ui/workspace-summaries';
 import { CloneDialog } from './TransportDialog';
 import { RemoteDialog, TransferDialog } from './RemoteDialog';
 import { RepositoryManager } from './RepositoryManager';
@@ -34,6 +34,22 @@ import { FileHistoryDialog } from './FileHistoryDialog';
 import { LocalHistoryDialog } from './LocalHistoryDialog';
 import { MultiRepositoryDialog } from './MultiRepositoryDialog';
 import { RepositoryWorkspaceDialog, WorkspaceRepositoryBar, type WorkspaceRepositories } from './RepositoryWorkspace';
+import {
+  hasPersistedTabsState,
+  mergeRepositoryTabs,
+  readPersistedTabSessions,
+  readPersistedTabsState,
+  removeOtherTabs,
+  removePersistedTabSession,
+  removeRepositoryTab,
+  removeTabsToRight,
+  reorderRepositoryTabs,
+  savePersistedTabSession,
+  savePersistedTabsState,
+  upsertRepositoryTab,
+  type RepositoryTab,
+  type WorkspaceMeta,
+} from './state/repositoryTabs';
 import { DiscardDialog, type DiscardMode, type DiscardPreview } from './DiscardDialog';
 import { LogTable } from './LogTable';
 import { LogFilterPanel, EMPTY_FILTERS, type LogFilters } from './LogFilters';
@@ -71,6 +87,8 @@ interface RepositorySession {
   branch: string;
   filters: LogFilters;
   activeChangeList: string;
+  historySig?: string;
+  page?: LogPage;
 }
 function readRepositoryDraft(root: string): string {
   if (!root) return '';
@@ -313,9 +331,12 @@ export function App() {
   const [localHistoryPath, setLocalHistoryPath] = useState<string | null>(null);
   const [showMultiRepository, setShowMultiRepository] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
-  const [workspace, setWorkspace] = useState<WorkspaceRepositories | null>(null);
+  const [openTabs, setOpenTabs] = useState<RepositoryTab[]>([]);
+  const [workspaceMeta, setWorkspaceMeta] = useState<WorkspaceMeta | null>(null);
+  const openTabsRef = useRef<RepositoryTab[]>([]);
+  const workspaceMetaRef = useRef<WorkspaceMeta | null>(null);
   const sessions = useRef(new Map<string, RepositorySession>());
-  const workspaceSummaries = useWorkspaceSummaries(workspace, status);
+  const workspaceSummaries = useRepositoryTabSummaries(openTabs, status);
   const [transfer, setTransfer] = useState<'fetch' | 'pull' | 'push' | null>(null);
   const [diffPreview, setDiffPreview] = useSetting('logDiffPreview');
   const [groupFilesByDir, setGroupFilesByDir] = useSetting('groupFilesByDir');
@@ -445,95 +466,179 @@ export function App() {
     });
   }
 
-  async function loadRepository(selectedPath: string, exactRoot = false) {
-      if (root && root === activeRoot.current) {
-        sessions.current.set(root, { view, target, selected, offset, search, searchInput, branch, filters: logFilters, activeChangeList });
-      }
+  function commitTabs(
+    nextTabs: RepositoryTab[],
+    nextActiveRoot: string,
+    nextMeta: WorkspaceMeta | null = workspaceMetaRef.current,
+  ) {
+    openTabsRef.current = nextTabs;
+    workspaceMetaRef.current = nextMeta;
+    setOpenTabs(nextTabs);
+    setWorkspaceMeta(nextMeta);
+    try {
+      savePersistedTabsState({
+        version: 1,
+        tabs: nextTabs,
+        activeRoot: nextActiveRoot,
+        workspaceMeta: nextMeta,
+      });
+    } catch {
+      setNotice('标签列表已更新，但无法保存到本机设置。');
+    }
+  }
+
+  function saveCurrentSession() {
+    if (!root || root !== activeRoot.current) return;
+    sessions.current.set(root, {
+      view,
+      target,
+      selected,
+      offset,
+      search,
+      searchInput,
+      branch,
+      filters: logFilters,
+      activeChangeList,
+      historySig: lastHistorySignature.current,
+      page,
+    });
+    savePersistedTabSession(root, { view, branch, activeChangeList });
+  }
+
+  function resetRepositoryUiState() {
+    setChangeListTarget(null);
+    setNewChangeListDialog(false);
+    setNewChangeListName('');
+    setShowLogFilters(false);
+    setDialog(null);
+    setOperationDialog(null);
+    setDiscard(null);
+    setDiscardError('');
+    setNavigation(null);
+    setNavigationResult(null);
+    setRevisionInput(null);
+    setRecovery(null);
+    setRecoveryError('');
+    setShowRecovery(false);
+    setLiveOperation(null);
+    setCommitContext(null);
+    setComparisonBranch(null);
+    setMergePath(null);
+    setShowHosting(false);
+    setShowWorktrees(false);
+    setIgnorePath(null);
+    setBranchDialog(null);
+    setReview(null);
+    setLocalHistoryPath(null);
+    setShowRemotes(false);
+    setShowManager(false);
+    setManagerStash(undefined);
+    setManagerRevision('');
+    setShowDiagnostics(false);
+    setShowBisect(false);
+    setShowSubmodules(false);
+    setHunks(null);
+    setShowAmend(false);
+    setShowInteractive(false);
+    setInteractiveBase('');
+    setInteractiveAction(undefined);
+    setFileHistory(false);
+    setTransfer(null);
+    setShowMultiRepository(false);
+  }
+
+  async function clearActiveRepository() {
+    saveCurrentSession();
+    const closingRoot = activeRoot.current;
+    if (closingRoot) {
+      await call('close_repository', { root: closingRoot }).catch(() => {});
+    }
+    activeRoot.current = '';
+    historyCapture.current?.setRoot('');
+    lastHistorySignature.current = '';
+    setStatus(null);
+    setPage(EMPTY_PAGE);
+    setSelected(null);
+    setDetails(null);
+    setTarget(null);
+    setLoadingLog(false);
+    setLoadingDetails(false);
+    setOffset(0);
+    setBranch('');
+    setSearch('');
+    setSearchInput('');
+    setLogFilters(EMPTY_FILTERS);
+    setMessageHistory([]);
+    setChangeLists([]);
+    setActiveChangeList('');
+    resetRepositoryUiState();
+  }
+
+  async function loadRepository(
+    selectedPath: string,
+    exactRoot = false,
+    tabHint?: Partial<RepositoryTab>,
+    nextMeta?: WorkspaceMeta | null,
+  ) {
+      saveCurrentSession();
       const next = await call<Status>('open_repository', { path: selectedPath, ...(exactRoot ? { exactRoot: true } : {}) });
-      const restored = sessions.current.get(next.repository.root);
+      const memoryRestored = sessions.current.get(next.repository.root);
+      const persistedRestored = memoryRestored ? undefined : readPersistedTabSessions()[next.repository.root];
       const lists = readChangeLists(next.repository.root);
       const savedMessages = readSaved<unknown>(`commit.messages.${next.repository.root}`, []);
+      const sig = historySignature(next);
       activeRoot.current = next.repository.root;
       historyCapture.current?.setRoot(next.repository.root);
       setStatus(next);
-      setPage(EMPTY_PAGE);
-      setSelected(restored?.selected ?? null);
+      const hasCachedPage = memoryRestored?.historySig === sig && memoryRestored.page && memoryRestored.page.commits.length > 0;
+      setPage(hasCachedPage ? memoryRestored!.page! : EMPTY_PAGE);
+      setSelected(memoryRestored?.selected ?? null);
       setDetails(null);
-      setView(restored?.view ?? view);
-      setLoadingLog(true);
+      setView(memoryRestored?.view ?? persistedRestored?.view ?? view);
+      setLoadingLog(!hasCachedPage);
       setLoadingDetails(false);
-      const nextTarget = restored?.target;
+      const nextTarget = memoryRestored?.target;
       setTarget(nextTarget && (nextTarget.revision !== null || next.changes.some(change => change.path === nextTarget.path &&
         (nextTarget.area === 'staged' ? staged(change) : unstaged(change)))) ? nextTarget : null);
       setChangeLists(lists);
-      setActiveChangeList(lists.some(list => list.id === restored?.activeChangeList) ? restored!.activeChangeList : '');
+      const restoredListId = memoryRestored?.activeChangeList ?? persistedRestored?.activeChangeList ?? '';
+      setActiveChangeList(lists.some(list => list.id === restoredListId) ? restoredListId : '');
       setMessageHistory(Array.isArray(savedMessages) ? savedMessages.filter((item): item is string => typeof item === 'string').slice(0, 30) : []);
-      setChangeListTarget(null);
-      setNewChangeListDialog(false);
-      setNewChangeListName('');
-      setOffset(restored?.offset ?? 0);
-      setBranch(restored?.branch ?? '');
-      setSearch(restored?.search ?? '');
-      setSearchInput(restored?.searchInput ?? '');
-      setLogFilters(restored?.filters ?? EMPTY_FILTERS);
-      setShowLogFilters(false);
-      setDialog(null);
-      setOperationDialog(null);
-      setDiscard(null);
-      setDiscardError('');
-      setNavigation(null);
-      setNavigationResult(null);
-      setRevisionInput(null);
-      setRecovery(null);
-      setRecoveryError('');
-      setShowRecovery(false);
-      setLiveOperation(null);
-      setCommitContext(null);
-      setComparisonBranch(null);
-      setMergePath(null);
-      setShowHosting(false);
-      setShowWorktrees(false);
-      setIgnorePath(null);
-      setBranchDialog(null);
-      setReview(null);
-      setLocalHistoryPath(null);
-      setShowRemotes(false);
-      setShowManager(false);
-      setManagerStash(undefined);
-      setManagerRevision('');
-      setShowDiagnostics(false);
-      setShowBisect(false);
-      setShowSubmodules(false);
-      setHunks(null);
-      setShowAmend(false);
-      setShowInteractive(false);
-      setInteractiveBase('');
-      setInteractiveAction(undefined);
-      setFileHistory(false);
-      setTransfer(null);
-      setShowMultiRepository(false);
-      setWorkspace(previous => previous?.repositories.some(repository => repository.root === next.repository.root) ? previous : null);
-      lastHistorySignature.current = historySignature(next);
+      setOffset(memoryRestored?.offset ?? 0);
+      setBranch(memoryRestored?.branch ?? persistedRestored?.branch ?? '');
+      setSearch(memoryRestored?.search ?? '');
+      setSearchInput(memoryRestored?.searchInput ?? '');
+      setLogFilters(memoryRestored?.filters ?? EMPTY_FILTERS);
+      resetRepositoryUiState();
+      lastHistorySignature.current = sig;
       setVersion((v) => v + 1);
       setHistoryVersion((v) => v + 1);
       const paths = [next.repository.root, ...recent.filter((p) => p !== next.repository.root)].slice(0, 8);
       setRecent(paths);
       try { save('recent', paths); }
       catch { setNotice('仓库已打开，但无法保存最近仓库列表。'); }
-      if (workspace?.repositories.some(repository => repository.root === next.repository.root)) {
-        try { save(`workspace.active.${workspace.root}`, next.repository.root); } catch { /* The current session remains usable. */ }
-      } else {
-        setWorkspace({ root: next.repository.root, repositories: [{ root: next.repository.root, name: next.repository.name, relativePath: '.' }], truncated: false, warnings: [] });
+      const mergedTabs = upsertRepositoryTab(openTabsRef.current, {
+        root: next.repository.root,
+        name: next.repository.name,
+        ...tabHint,
+      });
+      const targetMeta = nextMeta !== undefined ? nextMeta : workspaceMetaRef.current;
+      commitTabs(mergedTabs, next.repository.root, targetMeta);
+      if (targetMeta) {
+        try { save(`workspace.active.${targetMeta.root}`, next.repository.root); } catch { /* The current session remains usable. */ }
       }
   }
 
   function rememberWorkspace(next: WorkspaceRepositories, selected: string, depth: number) {
-    setWorkspace(next);
+    const meta: WorkspaceMeta = { root: next.root, truncated: next.truncated, warnings: next.warnings };
+    workspaceMetaRef.current = meta;
+    setWorkspaceMeta(meta);
     try {
       save('workspace.lastFolder', next.root);
       save('workspace.scanDepth', depth);
       if (selected) save(`workspace.active.${next.root}`, selected);
     } catch { setNotice('工作区已打开，本次无法记住路径或选中仓库。'); }
+    return meta;
   }
 
   async function openFolder(path?: string, restoring = false) {
@@ -544,25 +649,111 @@ export function App() {
       const savedDepth = readSaved<unknown>('workspace.scanDepth', 4);
       const depth = typeof savedDepth === 'number' && Number.isInteger(savedDepth) && savedDepth >= 0 && savedDepth <= 8 ? savedDepth : 4;
       const next = await call<WorkspaceRepositories>('discover_workspace', { path: folder, maxDepth: depth });
+      const discoveredTabs: RepositoryTab[] = next.repositories.map(repository => ({
+        root: repository.root,
+        name: repository.name,
+        relativePath: repository.relativePath,
+        workspaceRoot: next.root,
+      }));
       const remembered = readSaved<unknown>(`workspace.active.${next.root}`, '');
       const savedRoot = typeof remembered === 'string' ? remembered : '';
       const chosen = savedRoot ? next.repositories.find(repository => repository.root === savedRoot) : next.repositories[0];
       if (chosen) {
-        await loadRepository(chosen.root, true);
+        const meta: WorkspaceMeta = { root: next.root, truncated: next.truncated, warnings: next.warnings };
+        await loadRepository(chosen.root, true, { relativePath: chosen.relativePath, workspaceRoot: next.root }, meta);
+        const merged = mergeRepositoryTabs(openTabsRef.current, discoveredTabs);
+        commitTabs(merged, chosen.root, meta);
         rememberWorkspace(next, chosen.root, depth);
       } else {
-        if (root && root === activeRoot.current) {
-          sessions.current.set(root, { view, target, selected, offset, search, searchInput, branch, filters: logFilters, activeChangeList });
-          await call('close_repository', { root });
-        }
-        activeRoot.current = '';
-        historyCapture.current?.setRoot('');
-        setStatus(null); setPage(EMPTY_PAGE); setSelected(null); setDetails(null); setTarget(null);
-        setMessageHistory([]); setChangeLists([]); setActiveChangeList('');
-        rememberWorkspace(next, '', depth);
+        await clearActiveRepository();
+        const meta = rememberWorkspace(next, '', depth);
+        const merged = mergeRepositoryTabs(openTabsRef.current, discoveredTabs);
+        commitTabs(merged, '', meta);
         setNotice(savedRoot ? '上次使用的仓库不可用，请明确选择另一个标签；不会自动切到其他仓库。' : '没有发现仓库，可调整扫描层级或选择其他文件夹。');
       }
     });
+  }
+
+  function closeTab(targetRoot: string) {
+    if (gate.current) return;
+    const { tabs: nextTabs, nextActiveRoot } = removeRepositoryTab(openTabsRef.current, targetRoot, activeRoot.current);
+    sessions.current.delete(targetRoot);
+    removePersistedTabSession(targetRoot);
+    if (!nextTabs.length) {
+      void perform('关闭仓库', async () => {
+        await clearActiveRepository();
+        commitTabs([], '', null);
+      });
+      return;
+    }
+    if (targetRoot !== activeRoot.current) {
+      commitTabs(nextTabs, activeRoot.current);
+      return;
+    }
+    commitTabs(nextTabs, nextActiveRoot);
+    void openPath(nextActiveRoot, false, false, true).then((opened) => {
+      if (!opened && activeRoot.current === targetRoot) {
+        void perform('关闭仓库', async () => {
+          await clearActiveRepository();
+        });
+      }
+    });
+  }
+
+  function closeOtherTabs(keepRoot: string) {
+    if (gate.current) return;
+    for (const tab of openTabsRef.current) {
+      if (tab.root !== keepRoot) {
+        sessions.current.delete(tab.root);
+        removePersistedTabSession(tab.root);
+      }
+    }
+    const { tabs: nextTabs, nextActiveRoot } = removeOtherTabs(openTabsRef.current, keepRoot);
+    if (!nextTabs.length) return;
+    commitTabs(nextTabs, nextActiveRoot);
+    if (nextActiveRoot !== activeRoot.current) {
+      void openPath(nextActiveRoot, false, false, true).then((opened) => {
+        if (!opened) void perform('关闭仓库', async () => { await clearActiveRepository(); });
+      });
+    }
+  }
+
+  function closeTabsToRight(pivotRoot: string) {
+    if (gate.current) return;
+    const { tabs: nextTabs, nextActiveRoot } = removeTabsToRight(openTabsRef.current, pivotRoot, activeRoot.current);
+    const keepSet = new Set(nextTabs.map((tab) => tab.root));
+    for (const tab of openTabsRef.current) {
+      if (!keepSet.has(tab.root)) {
+        sessions.current.delete(tab.root);
+        removePersistedTabSession(tab.root);
+      }
+    }
+    commitTabs(nextTabs, nextActiveRoot);
+    if (nextActiveRoot && nextActiveRoot !== activeRoot.current) {
+      void openPath(nextActiveRoot, false, false, true).then((opened) => {
+        if (!opened) void perform('关闭仓库', async () => { await clearActiveRepository(); });
+      });
+    }
+  }
+
+  function closeAllTabs() {
+    if (gate.current) return;
+    for (const tab of openTabsRef.current) {
+      sessions.current.delete(tab.root);
+      removePersistedTabSession(tab.root);
+    }
+    void perform('关闭仓库', async () => {
+      await clearActiveRepository();
+      commitTabs([], '', null);
+    });
+  }
+
+  function reorderTabs(fromRoot: string, toRoot: string) {
+    if (gate.current) return;
+    const nextTabs = reorderRepositoryTabs(openTabsRef.current, fromRoot, toRoot);
+    if (nextTabs !== openTabsRef.current) {
+      commitTabs(nextTabs, activeRoot.current);
+    }
   }
 
   function chooseRepository() {
@@ -862,15 +1053,38 @@ export function App() {
   }
 
   useEffect(() => {
+    const hasSaved = hasPersistedTabsState();
+    const saved = readPersistedTabsState();
     void call<string | null>('initial_repository')
       .then(async (path) => {
         const session = readUpdateSession();
         const next = path || session?.root;
         if (!startupOpen.current) return;
-        if (next && await openPath(next, false, true)) {
-          if (session && (!path || path === session.root) && activeRoot.current === session.root) setRepositoryMessage(session.root, session.message);
-          if (session) save(UPDATE_SESSION, null);
-        } else if (!next && startupOpen.current) {
+        if (next) {
+          if (saved?.tabs.length) {
+            openTabsRef.current = saved.tabs;
+            workspaceMetaRef.current = saved.workspaceMeta;
+            setOpenTabs(saved.tabs);
+            setWorkspaceMeta(saved.workspaceMeta);
+          }
+          if (await openPath(next, false, true)) {
+            if (session && (!path || path === session.root) && activeRoot.current === session.root) setRepositoryMessage(session.root, session.message);
+            if (session) save(UPDATE_SESSION, null);
+          }
+        } else if (hasSaved) {
+          const restoredTabs = saved?.tabs ?? [];
+          const restoredMeta = saved?.workspaceMeta ?? null;
+          openTabsRef.current = restoredTabs;
+          workspaceMetaRef.current = restoredMeta;
+          setOpenTabs(restoredTabs);
+          setWorkspaceMeta(restoredMeta);
+          if (saved?.activeRoot && restoredTabs.some((tab) => tab.root === saved.activeRoot)) {
+            const opened = await openPath(saved.activeRoot, false, true, true);
+            if (!opened && startupOpen.current) {
+              setNotice('上次使用的仓库不可用，请明确选择另一个标签或关闭该标签；不会自动切到其他仓库。');
+            }
+          }
+        } else if (startupOpen.current) {
           const folder = readSaved<unknown>('workspace.lastFolder', '');
           if (typeof folder === 'string' && folder) await openFolder(folder, true);
         }
@@ -1053,15 +1267,42 @@ export function App() {
         event.preventDefault();
         void commit();
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'w' && openTabsRef.current.length > 0 && activeRoot.current && !busy) {
+        event.preventDefault();
+        closeTab(activeRoot.current);
+        return;
+      }
+      if (event.ctrlKey && event.key === 'Tab' && openTabsRef.current.length > 1 && !busy) {
+        event.preventDefault();
+        const tabs = openTabsRef.current;
+        const currentIndex = tabs.findIndex((tab) => tab.root === activeRoot.current);
+        const step = event.shiftKey ? -1 : 1;
+        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + step + tabs.length) % tabs.length;
+        void openPath(tabs[nextIndex].root, false, false, true);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && /^[1-9]$/.test(event.key) && openTabsRef.current.length > 0 && !busy) {
+        const targetTab = openTabsRef.current[Number(event.key) - 1];
+        if (targetTab && targetTab.root !== activeRoot.current) {
+          event.preventDefault();
+          void openPath(targetTab.root, false, false, true);
+          return;
+        }
+      }
       if (event.key === 'Escape' && !gate.current) setDialog(null);
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
   }, [root, view, message, busy, showUpdates, hasOtherModal]);
 
+  const openTabRoots = new Set(openTabs.map((tab) => tab.root));
   const paletteCommands: PaletteCommand[] = [
     { id: 'settings', label: '打开设置中心', category: '界面与设置', keywords: 'settings theme font 主题 字号', shortcut: 'Ctrl+,', icon: 'general/settings', run: () => setShowSettings(true) },
     { id: 'open-repo', label: '打开仓库 / 工作区文件夹', category: '仓库', keywords: 'open folder workspace', shortcut: 'Ctrl+O', icon: 'general/open', run: () => void chooseRepository() },
+    { id: 'add-repo-tab', label: '新增仓库标签…', category: '仓库标签', keywords: 'add new tab repository', icon: 'general/add', disabled: !!busy, run: () => void openPath(undefined, false, false, false) },
+    { id: 'close-repo-tab', label: '关闭当前仓库标签', category: '仓库标签', keywords: 'close tab', shortcut: 'Ctrl+W', icon: 'general/close', disabled: !!busy || !root, run: () => { if (root) closeTab(root); } },
+    { id: 'close-other-tabs', label: '关闭其他仓库标签', category: '仓库标签', keywords: 'close other tabs', icon: 'general/close', disabled: !!busy || openTabs.length <= 1 || !root, run: () => { if (root) closeOtherTabs(root); } },
+    { id: 'close-all-tabs', label: '关闭全部仓库标签', category: '仓库标签', keywords: 'close all tabs', icon: 'general/close', disabled: !!busy || !openTabs.length, run: () => closeAllTabs() },
     { id: 'workspace', label: '管理工作区多仓库', category: '仓库', keywords: 'workspace scan', icon: 'nodes/folder', run: () => { startupOpen.current = false; setShowWorkspace(true); } },
     { id: 'clone', label: '克隆远程仓库', category: '仓库', keywords: 'clone git', icon: 'general/add', run: () => setShowClone(true) },
     { id: 'update-project', label: '更新项目 (Pull / Auto-Shelf)', category: '远程同步', keywords: 'pull update rebase merge', shortcut: 'Ctrl+T', icon: 'vcs/update', disabled: !root || !!busy, run: () => setTransfer('pull') },
@@ -1095,11 +1336,22 @@ export function App() {
         disabled: !!busy || status.repository.operation !== 'none',
         run: () => void previewNavigation(b.full),
       })) ?? []),
+    ...openTabs
+      .filter((tab) => tab.root !== root)
+      .map((tab) => ({
+        id: `tab-${tab.root}`,
+        label: `切换标签：${tab.name}`,
+        category: '已打开标签',
+        keywords: tab.root,
+        icon: 'nodes/folder',
+        disabled: !!busy,
+        run: () => void openPath(tab.root, false, false, true),
+      })),
     ...recent
-      .filter((p) => p !== root)
+      .filter((p) => p !== root && !openTabRoots.has(p))
       .map((p) => ({
         id: `recent-${p}`,
-        label: `切换仓库：${p.replaceAll('\\', '/').split('/').pop()}`,
+        label: `打开最近仓库：${p.replaceAll('\\', '/').split('/').pop()}`,
         category: '最近仓库',
         keywords: p,
         icon: 'nodes/folder',
@@ -1111,6 +1363,9 @@ export function App() {
   function changeView(next: View) {
     setView(next);
     setTarget(null);
+    if (root && root === activeRoot.current) {
+      savePersistedTabSession(root, { view: next, branch, activeChangeList });
+    }
   }
 
   const activeList = changeLists.find((list) => list.id === activeChangeList);
@@ -1172,9 +1427,26 @@ export function App() {
         onRefresh={() => void perform('刷新', () => refresh(undefined, false, true))}
       />
 
-      {workspace && <WorkspaceRepositoryBar workspace={workspace} root={root} busy={!!busy} summaries={workspaceSummaries}
-        onSelect={path => { if (path !== root) void openPath(path, false, false, true); }}
-        onManage={() => setShowWorkspace(true)} onMultiRepo={() => setShowMultiRepository(true)} onClose={() => setWorkspace(null)} />}
+      {openTabs.length > 0 && (
+        <WorkspaceRepositoryBar
+          tabs={openTabs}
+          workspaceMeta={workspaceMeta}
+          root={root}
+          busy={!!busy}
+          summaries={workspaceSummaries}
+          recent={recent}
+          onSelect={(path) => { if (path !== root) void openPath(path, false, false, true); }}
+          onAdd={() => void openPath(undefined, false, false, false)}
+          onOpenRecent={(path) => void openPath(path)}
+          onCloseTab={closeTab}
+          onCloseOtherTabs={closeOtherTabs}
+          onCloseTabsToRight={closeTabsToRight}
+          onCloseAllTabs={closeAllTabs}
+          onReorderTabs={reorderTabs}
+          onManage={() => { startupOpen.current = false; setShowWorkspace(true); }}
+          onMultiRepo={() => setShowMultiRepository(true)}
+        />
+      )}
 
       {error && (
         <div class="message error-message" role="alert">
@@ -1738,10 +2010,19 @@ export function App() {
       {showCommandPalette && (
         <CommandPalette commands={paletteCommands} onClose={() => setShowCommandPalette(false)} />
       )}
-      {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspace?.root} autoScan={!!workspace} currentRoot={root} onClose={() => setShowWorkspace(false)}
+      {showWorkspace && <RepositoryWorkspaceDialog initialPath={workspaceMeta?.root} autoScan={!!workspaceMeta} currentRoot={root} onClose={() => setShowWorkspace(false)}
         onOpen={async (nextWorkspace, repository, depth) => {
+          const meta: WorkspaceMeta = { root: nextWorkspace.root, truncated: nextWorkspace.truncated, warnings: nextWorkspace.warnings };
           const success = await openPath(repository.root, false, false, true);
           if (success && activeRoot.current === repository.root) {
+            const discoveredTabs: RepositoryTab[] = nextWorkspace.repositories.map((item) => ({
+              root: item.root,
+              name: item.name,
+              relativePath: item.relativePath,
+              workspaceRoot: nextWorkspace.root,
+            }));
+            const merged = mergeRepositoryTabs(openTabsRef.current, discoveredTabs);
+            commitTabs(merged, repository.root, meta);
             rememberWorkspace(nextWorkspace, repository.root, depth);
             return true;
           }
@@ -1766,7 +2047,7 @@ export function App() {
       {showInteractive && root && <InteractiveRebase key={`${root}-${interactiveBase}-${interactiveAction?.hash ?? ''}-${interactiveAction?.action ?? ''}`} root={root} initialBase={interactiveBase} initialAction={interactiveAction} onClose={() => setShowInteractive(false)} onChanged={() => refresh(root, true)} />}
       {fileHistory && root && <FileHistoryDialog key={`${root}-${fileHistoryTab}-${fileHistoryRevision ?? ''}`} root={root} initialPath={target?.path ?? ''} initialRevision={fileHistoryRevision ?? target?.revision} initialTab={fileHistoryTab} onClose={() => setFileHistory(false)} />}
       {localHistoryPath !== null && root && <LocalHistoryDialog key={`${root}-${localHistoryPath}`} root={root} initialPath={localHistoryPath} onClose={() => setLocalHistoryPath(null)} onChanged={() => refresh(root)} />}
-      {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} workspaceRoots={workspace?.repositories.map((r) => r.root)} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} onOpenCommit={(targetRoot, commitHash) => {
+      {showMultiRepository && <MultiRepositoryDialog key={root} currentRoot={root} workspaceRoots={openTabs.map((tab) => tab.root)} onClose={() => setShowMultiRepository(false)} onChanged={() => refresh(root, true)} onOpenCommit={(targetRoot, commitHash) => {
         setShowMultiRepository(false);
         void (async () => {
           if (targetRoot !== root) {

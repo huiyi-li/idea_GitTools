@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, staged, type Status } from '../api';
-import type { WorkspaceRepositories, WorkspaceRepositorySummary } from '../RepositoryWorkspace';
+import type { RepositoryTab } from '../state/repositoryTabs';
+import type { WorkspaceRepositorySummary } from '../RepositoryWorkspace';
 
 function fromStatus(status: Status): WorkspaceRepositorySummary {
   const unique = (predicate: (change: Status['changes'][number]) => boolean) => new Set(status.changes.filter(predicate).map(change => change.path)).size;
   return { branch: status.repository.branch, changedFiles: unique(() => true), stagedFiles: unique(staged), conflicts: unique(change => change.conflict) };
 }
 
-export function useWorkspaceSummaries(workspace: WorkspaceRepositories | null, status: Status | null) {
+export function useRepositoryTabSummaries(tabs: RepositoryTab[], status: Status | null) {
   const [summaries, setSummaries] = useState<Record<string, WorkspaceRepositorySummary>>({});
   const activeRoot = useRef(status?.repository.root ?? '');
   activeRoot.current = status?.repository.root ?? '';
-  const roots = workspace?.repositories.map(repository => repository.root) ?? [];
+  const roots = tabs.map(tab => tab.root);
   const key = JSON.stringify(roots);
   useEffect(() => {
     let disposed = false;
