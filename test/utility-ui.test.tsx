@@ -18,6 +18,7 @@ const { LocalHistoryDialog } = await import('../src/LocalHistoryDialog');
 const { MultiRepositoryDialog } = await import('../src/MultiRepositoryDialog');
 const { SettingsModal } = await import('../src/SettingsModal');
 const { CommandPalette } = await import('../src/CommandPalette');
+const { InteractiveRebase } = await import('../src/InteractiveRebase');
 const { getSetting, resetAllSettings } = await import('../src/state/settings');
 const host = document.body.appendChild(document.createElement('div'));
 afterEach(() => render(null, host));
@@ -41,6 +42,33 @@ function deferred<T>() {
 const module = (path = 'libs/core') => ({ path, commit: 'a'.repeat(40), state: '正常', detail: '(heads/main)' });
 const noChange = async () => {};
 const noClose = () => {};
+
+test('graph fixup and squash include the preceding commit and reject an absent selection', async () => {
+  const parent = { hash: 'a'.repeat(40), parents: [], subject: 'base' };
+  const selected = { hash: 'b'.repeat(40), parents: [parent.hash], subject: 'change' };
+  for (const action of ['fixup', 'squash']) {
+    let calls = 0;
+    (globalThis as any).testBackend = async (command: string, args: any) => {
+      if (command === 'commit_details') return { commit: parent };
+      assert.equal(command, 'preview_interactive');
+      assert.equal(args.base, '', 'include root parent in the replay plan');
+      calls++;
+      return { head: selected.hash, branch: 'main', base: null, onto: null, mergeCount: 0, commits: [parent, selected] };
+    };
+    render(<InteractiveRebase root="C:/repo" initialBase={parent.hash} initialAction={{ hash: selected.hash, action }} onClose={noClose} onChanged={noChange} />, host);
+    button('读取提交计划').click();
+    await waitFor(() => host.querySelectorAll('select').length === 2);
+    assert.deepEqual([...host.querySelectorAll('select')].map(select => select.value), ['pick', action]);
+    button('读取提交计划').click();
+    await waitFor(() => calls === 2 && !button('读取提交计划').disabled);
+    render(null, host);
+  }
+  (globalThis as any).testBackend = async () => ({ head: parent.hash, branch: 'other', commits: [parent], mergeCount: 0 });
+  render(<InteractiveRebase root="C:/repo" initialBase={parent.hash} initialAction={{ hash: selected.hash, action: 'drop' }} onClose={noClose} onChanged={noChange} />, host);
+  button('读取提交计划').click();
+  await waitFor(() => host.textContent?.includes('所选提交不在可重放计划中'));
+  assert.equal(host.querySelectorAll('.hunk-item').length, 0);
+});
 
 test('submodule loading and failed reads never pretend the repository is empty', async () => {
   const pending = deferred<unknown[]>();

@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { call, type Commit } from './api';
+import { call, type Commit, type Details } from './api';
 import { Modal } from './ui/controls';
 import { TransportProgress } from './TransportDialog';
 
@@ -65,11 +65,21 @@ export function InteractiveRebase({
     setError('');
     setConfirm(false);
     try {
+      let planBase = base;
+      if (initialAction && ['fixup', 'squash'].includes(initialAction.action) && base === initialBase) {
+        if (!base) throw new Error('根提交没有可以合入的前一个提交');
+        const parent = await call<Details>('commit_details', { root, revision: base });
+        if (parent.commit.parents.length > 1) throw new Error('前一个提交是合并提交，请手动规划交互式 Rebase');
+        planBase = parent.commit.parents[0] ?? '';
+      }
       const preview = await call<Preview>('preview_interactive', {
         root,
-        base,
+        base: planBase,
         onto,
       });
+      if (initialAction && !preview.commits.some((commit) => commit.hash === initialAction.hash)) {
+        throw new Error('所选提交不在可重放计划中，请检查分支和起点');
+      }
       setPreview(preview);
       setEntries(
         preview.commits.map((commit) => ({
