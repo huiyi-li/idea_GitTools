@@ -40,6 +40,7 @@ class TestWorker extends BrowserWorker {
 Object.defineProperty(globalThis, 'Worker', { configurable: true, value: TestWorker });
 const { DiffView } = await import('../src/DiffView');
 const { EditorView } = await import('@codemirror/view');
+const { setSetting } = await import('../src/state/settings');
 const root = document.body.appendChild(document.createElement('div'));
 after(() => window.happyDOM.close());
 
@@ -62,6 +63,33 @@ function show(request: DiffTarget, version = 0) {
 function textAfter() {
   return root.querySelector('.diff-editors > div:last-child .cm-content')?.textContent ?? '';
 }
+
+test('inline blame refreshes with worktree changes and never annotates staged content from disk', async () => {
+  let author = 'First author';
+  let calls = 0;
+  globalThis.testBackend = async (command: string) => {
+    if (command === 'file_blame') {
+      calls++;
+      return { lines: [{ hash: 'a'.repeat(40), originalLine: 1, line: 1, author, time: 1, summary: 'message', path: 'working.txt', text: 'working' }] };
+    }
+    return { before: '', after: 'working', binary: false, tooLarge: false };
+  };
+  setSetting('inlineBlame', true);
+  try {
+    show(target('working.txt', null));
+    await waitFor(() => root.querySelector('.cm-inline-blame')?.textContent?.includes(author));
+    author = 'Second author';
+    show(target('working.txt', null), 1);
+    await waitFor(() => root.querySelector('.cm-inline-blame')?.textContent?.includes(author));
+    assert.equal(calls, 2);
+    show({ ...target('working.txt', null), area: 'staged' }, 2);
+    await waitFor(() => root.textContent?.includes('HEAD ↔ 暂存区') && root.querySelectorAll('.cm-editor').length === 2 && !root.querySelector('.cm-inline-blame'));
+    assert.equal(calls, 2);
+  } finally {
+    render(null, root);
+    setSetting('inlineBlame', false);
+  }
+});
 
 test('pending saves lock edits and cannot replace a newly selected file', async () => {
   let finishSave!: () => void;

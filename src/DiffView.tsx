@@ -46,6 +46,7 @@ function buildBlameDecorations(doc: Text, lines: BlameLine[]) {
     lines.flatMap((line) => {
       const number = line.line;
       if (number < 1 || number > doc.lines) return [];
+      if (doc.line(number).text.replace(/\r$/, '') !== line.text) return [];
       return [Decoration.widget({ widget: new BlameWidget(line), side: 1 }).range(doc.line(number).to)] as const;
     }),
     true,
@@ -142,7 +143,7 @@ export function DiffEditors({
   const editMode = useRef(new Compartment());
   const languageSupport = useRef<Extension>([]);
   const blameLines = useRef(blame ?? []);
-  blameLines.current = inlineBlame ? (blame ?? []) : [];
+  blameLines.current = inlineBlame && !editing ? (blame ?? []) : [];
   const views = useRef<EditorView[]>([]);
 
   async function saveEdit() {
@@ -289,13 +290,13 @@ export function DiffEditors({
   useEffect(() => {
     const rightView = views.current[1];
     if (!rightView) return;
-    const activeLines = inlineBlame ? (blame ?? []) : [];
+    const activeLines = inlineBlame && !editing ? (blame ?? []) : [];
     rightView.dispatch({
       effects: blameMode.current.reconfigure(
         activeLines.length ? EditorView.decorations.of(buildBlameDecorations(rightView.state.doc, activeLines)) : [],
       ),
     });
-  }, [inlineBlame, blame]);
+  }, [inlineBlame, blame, editing]);
   const synchronized = useRef(sync);
   synchronized.current = sync;
 
@@ -561,10 +562,10 @@ export function DiffEditors({
           <input type="checkbox" checked={sync} onChange={(e) => setSync(e.currentTarget.checked)} />
           同步滚动
         </label>
-        <label title="只读取当前文件的前 200 行 blame，自动保存设置">
+        {onToggleBlame && <label title="只读取当前文件的前 200 行 blame，编辑期间隐藏，自动保存设置">
           <input type="checkbox" checked={inlineBlame} onChange={(event) => onToggleBlame?.(event.currentTarget.checked)} />
           Inline Blame
-        </label>
+        </label>}
         <label title="同时应用于文件 diff 和三栏合并，自动保存设置">
           <input
             type="checkbox"
@@ -734,12 +735,12 @@ export function DiffView({
   useEffect(() => {
     let current = true;
     setBlame([]);
-    if (!showBlame || !target || !target.path) return;
+    if (!showBlame || !target || !target.path || target.area === 'staged') return;
     void call<{ lines: BlameLine[] }>('file_blame', { root, path: target.path, revision: target.revision, offset: 0 })
       .then((value) => { if (current) setBlame(value.lines); })
       .catch(() => { if (current) setBlame([]); });
     return () => { current = false; };
-  }, [root, key, showBlame, target?.path, target?.revision]);
+  }, [root, key, showBlame, target?.path, target?.revision, target?.revision ? 0 : version]);
 
   useEffect(() => {
     let current = true;
@@ -909,8 +910,8 @@ export function DiffView({
           selectedLine.current = line;
         }}
         blame={blame}
-        showBlame={showBlame}
-        onToggleBlame={setShowBlame}
+        showBlame={showBlame && target.area !== 'staged'}
+        onToggleBlame={target.area === 'staged' ? undefined : setShowBlame}
         canEdit={canEdit}
         onSave={handleSaveWorktree}
         onDirtyChange={(dirty) => {

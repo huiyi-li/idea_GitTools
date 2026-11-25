@@ -1,4 +1,5 @@
 import type { Commit, Status } from '../api';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { NavigationAction } from '../navigation/types';
 
 export function CommitContextMenu({
@@ -38,14 +39,32 @@ export function CommitContextMenu({
   onOpenRevisionTree: (commit: Commit) => void;
 }) {
   const { commit, x, y } = context;
+  const menu = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 8, top: 8 });
+  useLayoutEffect(() => {
+    const positionMenu = () => {
+      const bounds = menu.current?.getBoundingClientRect();
+      if (!bounds) return;
+      setPosition({
+        left: Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8)),
+        top: Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8)),
+      });
+    };
+    positionMenu();
+    window.addEventListener('resize', positionMenu);
+    return () => window.removeEventListener('resize', positionMenu);
+  }, [x, y]);
   const child = commits.find((item) => item.parents.includes(commit.hash));
   return (
     <div
+      ref={menu}
       class="action-popup commit-context-menu"
       role="menu"
       style={{
-        left: Math.max(8, Math.min(x, window.innerWidth - 290)),
-        top: Math.max(8, Math.min(y, window.innerHeight - 150)),
+        ...position,
+        maxHeight: 'calc(100vh - 16px)',
+        maxWidth: 'calc(100vw - 16px)',
+        overflowY: 'auto',
       }}
     >
       <button role="menuitem" disabled={busy} onClick={onCopyRevision}>

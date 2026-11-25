@@ -18,6 +18,7 @@ const { LocalHistoryDialog } = await import('../src/LocalHistoryDialog');
 const { MultiRepositoryDialog } = await import('../src/MultiRepositoryDialog');
 const { SettingsModal } = await import('../src/SettingsModal');
 const { CommandPalette } = await import('../src/CommandPalette');
+const { CommitContextMenu } = await import('../src/layout/CommitContextMenu');
 const { InteractiveRebase } = await import('../src/InteractiveRebase');
 const { getSetting, resetAllSettings } = await import('../src/state/settings');
 const host = document.body.appendChild(document.createElement('div'));
@@ -42,6 +43,24 @@ function deferred<T>() {
 const module = (path = 'libs/core') => ({ path, commit: 'a'.repeat(40), state: '正常', detail: '(heads/main)' });
 const noChange = async () => {};
 const noClose = () => {};
+
+test('commit context menu fits the measured menu inside the viewport and repositions on resize', async () => {
+  const original = window.HTMLElement.prototype.getBoundingClientRect;
+  window.HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.classList.contains('commit-context-menu')) return { width: 320, height: 600 } as DOMRect;
+    return original.call(this);
+  };
+  try {
+    render(<CommitContextMenu context={{ commit: { hash: 'a'.repeat(40), parents: [], subject: 'test', author: '', email: '', time: 0, refs: [] }, x: 1000, y: 700 }} commits={[]} status={null} busy={false} historyDisabled onClose={noClose} onCopyRevision={noClose} onSavePatch={noClose} onSelectCommit={noClose} onPreviewNavigation={noClose} onOpenInteractive={noClose} onCherryPick={noClose} onRevert={noClose} onCreateTag={noClose} onOpenRevisionTree={noClose} />, host);
+    const menu = host.querySelector<HTMLElement>('[role="menu"]')!;
+    await waitFor(() => menu.style.top === `${Math.max(8, Math.min(700, window.innerHeight - 608))}px`);
+    assert.equal(menu.style.left, `${Math.max(8, Math.min(1000, window.innerWidth - 328))}px`);
+    assert.equal(menu.style.overflowY, 'auto');
+    window.dispatchEvent(new window.Event('resize'));
+    await tick();
+    assert.ok(parseFloat(menu.style.top) + 600 <= window.innerHeight);
+  } finally { window.HTMLElement.prototype.getBoundingClientRect = original; }
+});
 
 test('graph fixup and squash include the preceding commit and reject an absent selection', async () => {
   const parent = { hash: 'a'.repeat(40), parents: [], subject: 'base' };
