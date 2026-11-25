@@ -11,7 +11,7 @@ import { syntaxTheme } from './merge/theme';
 import { buildChanges } from './shared/intellijDiff';
 import { ToolButton } from './ui/controls';
 import { useMinimapPreference } from './ui/editor-preferences';
-import { getSetting, useSetting } from './state/settings';
+import { useSetting } from './state/settings';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from './ui/minimap';
 import {
   diffLineHighlights,
@@ -105,7 +105,7 @@ export function DiffEditors({
   selection.current = onLineSelect;
   const left = useRef<HTMLDivElement>(null);
   const right = useRef<HTMLDivElement>(null);
-  const [sync, setSync] = useState(() => getSetting('diffSyncScroll'));
+  const [sync, setSync] = useSetting('diffSyncScroll');
   const [minimap, setMinimap] = useMinimapPreference();
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -697,6 +697,7 @@ export function DiffView({
   const cache = useRef(new Map<string, LoadedDiff>());
   const worker = useRef<MergeAnalysis>();
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
+  const [saveError, setSaveError] = useState<{ key: string; message: string } | null>(null);
   const [phase, setPhase] = useState('');
   const [allowedKey, setAllowedKey] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -818,7 +819,7 @@ export function DiffView({
   );
   async function handleSaveWorktree(nextContent: string): Promise<boolean> {
     if (!target || !data) return false;
-    setError(null);
+    setSaveError(null);
     try {
       await call('save_worktree_file', {
         root,
@@ -842,7 +843,7 @@ export function DiffView({
       onSaved?.();
       return true;
     } catch (e) {
-      setError({ key, message: String(e) });
+      setSaveError({ key, message: String(e) });
       return false;
     }
   }
@@ -943,6 +944,7 @@ export function DiffView({
                   : 'HEAD ↔ 工作区'}
         </span>
       </div>
+      {saveError?.key === key && <div class="error-text" role="alert">{saveError.message}</div>}
       {content}
     </section>
   );

@@ -232,8 +232,10 @@ test('file scrolling batches geometry reads and ignores feedback from synchroniz
 test('worktree diff supports lightweight editing, word highlights, revert and atomic save while historical diffs remain read-only', async () => {
   const saves: any[] = [];
   let savedCount = 0;
+  let failSave = true;
   globalThis.testBackend = async (command: string, args: any) => {
     if (command === 'save_worktree_file') {
+      if (failSave) throw new Error('disk write failed');
       saves.push(args);
       return '';
     }
@@ -304,6 +306,11 @@ test('worktree diff supports lightweight editing, word highlights, revert and at
       changes: { from: 0, to: rightView.state.doc.length, insert: 'const count = 42;\nconst stay = true;\n' },
     });
     await waitFor(() => !(root.querySelector('.diff-save-btn') as HTMLButtonElement).disabled);
+    (root.querySelector('.diff-save-btn') as HTMLButtonElement).click();
+    await waitFor(() => root.querySelector('[role="alert"]')?.textContent?.includes('disk write failed'));
+    assert.equal(EditorView.findFromDOM(root.querySelector('.diff-editors > div:last-child .cm-editor') as HTMLElement), rightView);
+    assert.ok(textAfter().includes('const count = 42;'), 'failed saves preserve the draft');
+    failSave = false;
     (root.querySelector('.diff-save-btn') as HTMLButtonElement).click();
     await waitFor(() => saves.length === 1 && savedCount === 1);
     assert.equal(saves[0].path, 'working.ts');
