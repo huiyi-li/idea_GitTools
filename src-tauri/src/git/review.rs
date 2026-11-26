@@ -21,15 +21,28 @@ pub struct CommitReview {
 }
 
 impl Git {
+    #[cfg(test)]
     pub async fn commit_review(&self, revision: &str, path: &str) -> Result<CommitReview, String> {
         self.commit_review_with_options(revision, path, false).await
     }
 
+    #[cfg(test)]
     pub async fn commit_review_with_options(
         &self,
         revision: &str,
         path: &str,
         allow_large: bool,
+    ) -> Result<CommitReview, String> {
+        self.commit_review_with_encoding(revision, path, allow_large, None)
+            .await
+    }
+
+    pub async fn commit_review_with_encoding(
+        &self,
+        revision: &str,
+        path: &str,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<CommitReview, String> {
         validate_path(path)?;
         let details = self.details(revision).await?;
@@ -41,9 +54,9 @@ impl Git {
         let parent = details.commit.parents.first().cloned();
         let before_path = change.old_path.as_deref().unwrap_or(path);
         let (before_res, after_res, current_res) = tokio::join!(
-            self.blob_snapshot(parent.as_deref(), before_path, allow_large),
-            self.blob_snapshot(Some(revision), path, allow_large),
-            self.review_worktree_with_options(path, allow_large),
+            self.blob_snapshot_with_encoding(parent.as_deref(), before_path, allow_large, preferred_encoding),
+            self.blob_snapshot_with_encoding(Some(revision), path, allow_large, preferred_encoding),
+            self.review_worktree_with_encoding(path, allow_large, preferred_encoding),
         );
         let before = before_res?;
         let after = after_res?;
@@ -68,14 +81,26 @@ impl Git {
         })
     }
 
+    #[cfg(test)]
     pub async fn review_worktree(&self, selected: &str) -> Result<WorktreeSnapshot, String> {
         self.review_worktree_with_options(selected, false).await
     }
 
+    #[cfg(test)]
     pub async fn review_worktree_with_options(
         &self,
         selected: &str,
         allow_large: bool,
+    ) -> Result<WorktreeSnapshot, String> {
+        self.review_worktree_with_encoding(selected, allow_large, None)
+            .await
+    }
+
+    pub async fn review_worktree_with_encoding(
+        &self,
+        selected: &str,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<WorktreeSnapshot, String> {
         let path = if Path::new(selected).is_absolute() {
             let absolute = std::fs::canonicalize(selected).map_err(|e| e.to_string())?;
@@ -88,7 +113,7 @@ impl Git {
         };
         validate_path(&path)?;
         let (file, repository) = tokio::try_join!(
-            self.worktree_snapshot(&path, allow_large),
+            self.worktree_snapshot_with_encoding(&path, allow_large, preferred_encoding),
             self.repository(),
         )?;
         Ok(WorktreeSnapshot {

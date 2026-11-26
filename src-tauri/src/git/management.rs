@@ -183,6 +183,7 @@ mod tests {
                 revision: Some(untracked.revision.clone()),
                 before_revision: None,
                 area: None,
+                encoding: None,
             })
             .await
             .unwrap();
@@ -194,6 +195,7 @@ mod tests {
             revision: None,
             before_revision: Some(untracked.revision.clone()),
             area: None,
+            encoding: None,
         };
         let missing = git.diff(comparison.clone()).await.unwrap();
         assert_eq!(missing.before, "new\n");
@@ -299,6 +301,7 @@ mod tests {
             finish: true,
             choice: "right".into(),
             progress: None,
+            encoding: None,
         })
         .await
         .unwrap();

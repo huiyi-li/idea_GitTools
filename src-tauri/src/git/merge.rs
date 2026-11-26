@@ -67,6 +67,7 @@ pub(super) struct MergeSession {
     operation_id: String,
     worktree: String,
     crlf: bool,
+    encoding: String,
     marker_size: usize,
     draft_path: PathBuf,
     allow_large: bool,
@@ -82,6 +83,7 @@ pub(crate) struct MergeDocument {
     left: String,
     right: String,
     working: Option<String>,
+    encoding: String,
     left_title: String,
     right_title: String,
     left_stage: usize,
@@ -104,6 +106,8 @@ pub(crate) struct SaveMerge {
     pub finish: bool,
     pub choice: String,
     pub progress: Option<Progress>,
+    #[serde(default)]
+    pub encoding: Option<String>,
 }
 
 impl Git {
@@ -203,22 +207,34 @@ impl Git {
         path: &str,
         binary: bool,
         allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<FileSnapshot, String> {
         let Some(entry) = entry else {
             return Ok(FileSnapshot::new(path, None, SnapshotState::Missing, &[]));
         };
-        self.blob_content(path, None, &entry.hash, binary, allow_large)
+        self.blob_content_with_encoding(path, None, &entry.hash, binary, allow_large, preferred_encoding)
             .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn open_merge(&mut self, path: String) -> Result<MergeDocument, String> {
         self.open_merge_with_options(path, false).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn open_merge_with_options(
         &mut self,
         path: String,
         allow_large: bool,
+    ) -> Result<MergeDocument, String> {
+        self.open_merge_with_encoding(path, allow_large, None).await
+    }
+
+    pub(crate) async fn open_merge_with_encoding(
+        &mut self,
+        path: String,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<MergeDocument, String> {
         validate_path(&path)?;
         let worktree_path = checked_path(&self.root, &path)?;
@@ -241,15 +257,17 @@ impl Git {
             .all(|e| matches!(e.mode.as_str(), "100644" | "100755"));
         let binary = !modes_supported || self.binary_path(&path, None).await?;
         let base = self
-            .merge_blob(base_entry, &path, binary, allow_large)
+            .merge_blob(base_entry, &path, binary, allow_large, preferred_encoding)
             .await?;
         let left = self
-            .merge_blob(left_entry, &path, binary, allow_large)
+            .merge_blob(left_entry, &path, binary, allow_large, preferred_encoding)
             .await?;
         let right = self
-            .merge_blob(right_entry, &path, binary, allow_large)
+            .merge_blob(right_entry, &path, binary, allow_large, preferred_encoding)
             .await?;
-        let working_snapshot = self.worktree_snapshot(&path, allow_large).await?;
+        let working_snapshot = self
+            .worktree_snapshot_with_encoding(&path, allow_large, preferred_encoding)
+            .await?;
         let snapshots = [&base, &left, &right, &working_snapshot];
         let editable = modes_supported
             && snapshots
@@ -261,6 +279,17 @@ impl Git {
                 matches!(file.state, SnapshotState::Text | SnapshotState::Missing) || file.can_load
             });
         let large = snapshots.iter().any(|file| file.large);
+        let detected_encoding = preferred_encoding
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
+            .map(str::to_owned)
+            .or_else(|| {
+                [&working_snapshot, &left, &right, &base]
+                    .iter()
+                    .find(|file| file.state == SnapshotState::Text)
+                    .map(|file| file.encoding.clone())
+            })
+            .unwrap_or_else(|| super::encoding::DEFAULT_ENCODING.to_string());
         let working = matches!(
             working_snapshot.state,
             SnapshotState::Text | SnapshotState::Missing
@@ -362,6 +391,7 @@ impl Git {
             operation_id,
             worktree,
             crlf: working.as_ref().is_some_and(|text| text.contains("\r\n")),
+            encoding: detected_encoding.clone(),
             marker_size,
             draft_path,
             allow_large,
@@ -374,6 +404,7 @@ impl Git {
             left: left.text,
             right: right.text,
             working,
+            encoding: detected_encoding,
             left_title: if rebase {
                 format!("正在重放的提交 · {other}")
             } else {
@@ -469,13 +500,20 @@ impl Git {
                 } else {
                     MAX_FILE
                 };
-                if content.len() > limit {
+                let write_encoding = request
+                    .encoding
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
+                    .unwrap_or(&session.encoding);
+                let encoded = super::encoding::encode_text(&content, write_encoding)?;
+                if encoded.len() > limit {
                     return Err("合并结果超过文件大小限制".into());
                 }
                 fs::create_dir_all(path.parent().ok_or("文件路径错误")?)
                     .map_err(|e| e.to_string())?;
                 checked_path(&self.root, &session.path)?;
-                atomic_write(&path, content.as_bytes(), Some(&session.worktree))?;
+                atomic_write(&path, &encoded, Some(&session.worktree))?;
             }
             "left" | "right" if request.finish => {
                 let rebase = self.repository().await?.operation == "rebase";

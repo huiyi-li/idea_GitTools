@@ -403,10 +403,11 @@ async fn save_worktree_file(
     path: String,
     content: String,
     expected: String,
+    encoding: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     active(&*state.0.lock().await, &root)?
-        .save_worktree_file(&path, &content, &expected)
+        .save_worktree_file_with_encoding(&path, &content, &expected, encoding.as_deref())
         .await
 }
 
@@ -458,15 +459,13 @@ async fn read_commit_review(
     revision: String,
     path: String,
     allow_large: Option<bool>,
+    encoding: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CommitReview, String> {
     let current = state.0.lock().await;
     let git = active(&current, &root)?;
-    if allow_large.unwrap_or(false) {
-        git.commit_review_with_options(&revision, &path, true).await
-    } else {
-        git.commit_review(&revision, &path).await
-    }
+    git.commit_review_with_encoding(&revision, &path, allow_large.unwrap_or(false), encoding.as_deref())
+        .await
 }
 
 #[tauri::command]
@@ -474,15 +473,13 @@ async fn read_review_worktree(
     root: String,
     path: String,
     allow_large: Option<bool>,
+    encoding: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<WorktreeSnapshot, String> {
     let current = state.0.lock().await;
     let git = active(&current, &root)?;
-    if allow_large.unwrap_or(false) {
-        git.review_worktree_with_options(&path, true).await
-    } else {
-        git.review_worktree(&path).await
-    }
+    git.review_worktree_with_encoding(&path, allow_large.unwrap_or(false), encoding.as_deref())
+        .await
 }
 
 #[tauri::command]
@@ -801,16 +798,14 @@ async fn open_merge(
     root: String,
     path: String,
     allow_large: Option<bool>,
+    encoding: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<MergeDocument, String> {
     let mut current = state.0.lock().await;
     active(&current, &root)?;
     let git = current.as_mut().ok_or("请先打开仓库")?;
-    if allow_large.unwrap_or(false) {
-        git.open_merge_with_options(path, true).await
-    } else {
-        git.open_merge(path).await
-    }
+    git.open_merge_with_encoding(path, allow_large.unwrap_or(false), encoding.as_deref())
+        .await
 }
 
 #[tauri::command]

@@ -33,6 +33,8 @@ reqwest = { version = "0.12", features = ["json"] }
 tauri-plugin-opener = "2"
 tokio = { version = "1", features = ["process", "io-util", "time", "sync", "net", "rt-multi-thread", "macros"] }
 tauri-plugin-updater = "2"
+encoding_rs = "0.8"
+chardetng = "0.1"
 
 [dev-dependencies]
 minisign-verify = "0.3"

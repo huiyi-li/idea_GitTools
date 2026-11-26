@@ -55,6 +55,7 @@ async fn whole_side_resolution_replaces_an_existing_conflict_file() {
         choice: "right".into(),
         finish: true,
         progress: None,
+        encoding: None,
     })
     .await
     .unwrap();
@@ -76,6 +77,7 @@ async fn whole_side_resolution_can_restore_a_removed_parent_directory() {
         choice: "right".into(),
         finish: true,
         progress: None,
+        encoding: None,
     })
     .await
     .unwrap();
@@ -96,6 +98,7 @@ fn result(id: &str, text: &str, finish: bool) -> SaveMerge {
             states: vec![],
             content_modified: true,
         }),
+        encoding: None,
     }
 }
 
@@ -369,7 +372,8 @@ async fn side_checkout_filter_failure_keeps_original_worktree() {
             id: document.id,
             finish: true,
             choice: "left".into(),
-            progress: None
+            progress: None,
+            encoding: None,
         })
         .await
         .is_err());
@@ -481,6 +485,7 @@ async fn side_selection_resolves_delete_and_binary_conflicts() {
         finish: true,
         choice: "left".into(),
         progress: None,
+        encoding: None,
     })
     .await
     .unwrap();
@@ -517,6 +522,7 @@ async fn side_selection_resolves_delete_and_binary_conflicts() {
         finish: true,
         choice: "right".into(),
         progress: None,
+        encoding: None,
     })
     .await
     .unwrap();

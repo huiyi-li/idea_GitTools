@@ -25,12 +25,12 @@ pub(crate) struct BlameLine {
     time: i64,
     summary: String,
     path: String,
-    text: String,
+    pub(super) text: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BlamePage {
-    lines: Vec<BlameLine>,
+    pub(super) lines: Vec<BlameLine>,
     has_more: bool,
 }
 
@@ -156,7 +156,7 @@ impl Git {
             self.worktree_snapshot(path, true).await?
         };
         if file.state != content::SnapshotState::Text {
-            return Err("此版本不是可读取的 UTF-8 文本文件".into());
+            return Err("此版本不是可读取的文本文件".into());
         }
         let line_count = file.text.lines().count();
         if offset >= line_count {
@@ -178,15 +178,22 @@ impl Git {
             args.push(revision);
         }
         args.extend(["--", path]);
-        let output = self.text(&args).await?;
+        let output = self.bytes(&args).await?;
         let mut lines = Vec::new();
         let mut entry = BlameLine::default();
-        for line in output.lines() {
-            if let Some(text) = line.strip_prefix('\t') {
-                entry.text = text.into();
+        for raw_line in output.split(|&b| b == b'\n') {
+            let raw_line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
+            if raw_line.is_empty() && entry.hash.is_empty() {
+                continue;
+            }
+            if let Some(text_bytes) = raw_line.strip_prefix(b"\t") {
+                entry.text = super::encoding::decode_lossy_with_hint(text_bytes, Some(&file.encoding));
                 lines.push(entry);
                 entry = BlameLine::default();
-            } else if let Some(author) = line.strip_prefix("author ") {
+                continue;
+            }
+            let line = String::from_utf8_lossy(raw_line);
+            if let Some(author) = line.strip_prefix("author ") {
                 entry.author = author.into();
             } else if let Some(time) = line.strip_prefix("author-time ") {
                 entry.time = time.parse().map_err(|_| "Blame 时间无效")?;

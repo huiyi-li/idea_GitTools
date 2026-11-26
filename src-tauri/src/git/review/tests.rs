@@ -92,7 +92,7 @@ async fn unsupported_snapshots_do_not_prevent_reading_the_other_sides() {
     let selected = commit(&git, "file.txt", "after\n", "After").await;
     for (bytes, state) in [
         (vec![0, 1, 2], SnapshotState::Binary),
-        (vec![0xff, 0xfe], SnapshotState::Encoding),
+        (vec![0xff, 0xfe, 0x00, 0xd8], SnapshotState::Encoding),
         (vec![b'x'; MAX_FILE + 1], SnapshotState::TooLarge),
         (
             "line\n".repeat(MAX_LINES + 1).into_bytes(),

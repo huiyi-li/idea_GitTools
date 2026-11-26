@@ -8,6 +8,7 @@ use tokio::process::Command;
 
 mod content;
 pub(crate) mod discard;
+pub(crate) mod encoding;
 pub(crate) mod file_history;
 pub(crate) mod history;
 pub(crate) mod hunks;
@@ -634,19 +635,20 @@ impl Git {
         {
             return Err("历史文件比较不使用暂存区范围".into());
         }
+        let preferred = request.encoding.as_deref();
         let (before, after) = if let Some(before_revision) = request.before_revision {
             validate_hash(&before_revision)?;
             if let Some(revision) = &request.revision {
                 validate_hash(revision)?;
             }
             tokio::try_join!(
-                self.blob_snapshot(Some(&before_revision), old_path, allow_large),
+                self.blob_snapshot_with_encoding(Some(&before_revision), old_path, allow_large, preferred),
                 async {
                     if let Some(revision) = &request.revision {
-                        self.blob_snapshot(Some(revision), &request.path, allow_large)
+                        self.blob_snapshot_with_encoding(Some(revision), &request.path, allow_large, preferred)
                             .await
                     } else {
-                        self.worktree_snapshot(&request.path, allow_large).await
+                        self.worktree_snapshot_with_encoding(&request.path, allow_large, preferred).await
                     }
                 },
             )?
@@ -664,40 +666,40 @@ impl Git {
             tokio::try_join!(
                 async {
                     if let Some(parent) = parent {
-                        self.blob_snapshot(Some(parent), old_path, allow_large).await
+                        self.blob_snapshot_with_encoding(Some(parent), old_path, allow_large, preferred).await
                     } else {
                         Ok(FileSnapshot::new(old_path, None, SnapshotState::Missing, &[]))
                     }
                 },
-                self.blob_snapshot(Some(&revision), &request.path, allow_large),
+                self.blob_snapshot_with_encoding(Some(&revision), &request.path, allow_large, preferred),
             )?
         } else {
             tokio::try_join!(
                 async {
                     if matches!(request.area, Some(DiffArea::Unstaged)) {
-                        let indexed = self.index_snapshot(&request.path, allow_large).await?;
+                        let indexed = self.index_snapshot_with_encoding(&request.path, allow_large, preferred).await?;
                         if indexed.state == SnapshotState::Missing && old_path != request.path {
-                            self.index_snapshot(old_path, allow_large).await
+                            self.index_snapshot_with_encoding(old_path, allow_large, preferred).await
                         } else {
                             Ok(indexed)
                         }
                     } else if let Some(head) = self.head().await? {
-                        self.blob_snapshot(Some(&head), old_path, allow_large).await
+                        self.blob_snapshot_with_encoding(Some(&head), old_path, allow_large, preferred).await
                     } else {
                         Ok(FileSnapshot::new(old_path, None, SnapshotState::Missing, &[]))
                     }
                 },
                 async {
                     if matches!(request.area, Some(DiffArea::Staged)) {
-                        self.index_snapshot(&request.path, allow_large).await
+                        self.index_snapshot_with_encoding(&request.path, allow_large, preferred).await
                     } else {
-                        self.worktree_snapshot(&request.path, allow_large).await
+                        self.worktree_snapshot_with_encoding(&request.path, allow_large, preferred).await
                     }
                 },
             )?
         };
         if before.state == SnapshotState::Encoding || after.state == SnapshotState::Encoding {
-            return Err("This file is not UTF-8. Use an external editor to view it.".into());
+            return Err("无法识别此文件的字符编码，请在上方手动切换编码或使用外部编辑器查看。".into());
         }
         let binary = [&before, &after]
             .iter()
@@ -729,6 +731,8 @@ impl Git {
             } else {
                 after.text
             },
+            before_encoding: before.encoding,
+            after_encoding: after.encoding,
             binary,
             too_large,
             can_load,
@@ -737,11 +741,23 @@ impl Git {
         })
     }
 
+    #[cfg(test)]
     pub async fn save_worktree_file(
         &self,
         path: &str,
         content: &str,
         expected: &str,
+    ) -> Result<(), String> {
+        self.save_worktree_file_with_encoding(path, content, expected, None)
+            .await
+    }
+
+    pub async fn save_worktree_file_with_encoding(
+        &self,
+        path: &str,
+        content: &str,
+        expected: &str,
+        target_encoding: Option<&str>,
     ) -> Result<(), String> {
         use content::SnapshotState;
         if content.len() > content::MAX_LARGE_FILE {
@@ -759,24 +775,28 @@ impl Git {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.to_string()),
         }
-        let current = self.worktree_snapshot(path, true).await?;
+        let requested = target_encoding
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"));
+        let current = match self.worktree_snapshot_with_encoding(path, true, None).await? {
+            snapshot if snapshot.state == SnapshotState::Encoding && requested.is_some() => {
+                self.worktree_snapshot_with_encoding(path, true, requested).await?
+            }
+            snapshot => snapshot,
+        };
         let current_normalized = match current.state {
             SnapshotState::Text => current.text.replace("\r\n", "\n"),
             SnapshotState::Missing if expected.is_empty() => String::new(),
             SnapshotState::Missing => {
                 return Err("工作区文件已被删除，请刷新后再试".into());
             }
-            _ => return Err("此文件不是可编辑的 UTF-8 文本文件".into()),
+            _ => return Err("此文件不是可编辑的文本文件".into()),
         };
         if current_normalized != expected.replace("\r\n", "\n") {
             return Err("工作区文件已在外部改变，请刷新后再编辑".into());
         }
         let _ = self.local_history_capture(path, "Diff 轻量编辑前备份").await;
-        let raw_crlf = std::fs::read(&file_path)
-            .ok()
-            .is_some_and(|bytes| bytes.windows(2).any(|w| w == b"\r\n"));
-        let use_crlf = raw_crlf
-            || current.text.contains("\r\n")
+        let use_crlf = current.text.contains("\r\n")
             || (!current.text.contains('\n') && expected.contains("\r\n"));
         let normalized = content.replace("\r\n", "\n");
         let output = if use_crlf {
@@ -784,10 +804,19 @@ impl Git {
         } else {
             normalized
         };
+        let write_encoding = requested.unwrap_or(if current.state == SnapshotState::Missing {
+            encoding::DEFAULT_ENCODING
+        } else {
+            &current.encoding
+        });
+        let encoded = encoding::encode_text(&output, write_encoding)?;
+        if encoded.len() > content::MAX_LARGE_FILE {
+            return Err("文件超过编辑大小限制".into());
+        }
         if let Some(parent) = file_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        merge::atomic_write(&file_path, output.as_bytes(), None)?;
+        merge::atomic_write(&file_path, &encoded, None)?;
         let _ = self.local_history_capture(path, "Diff 轻量编辑保存").await;
         Ok(())
     }

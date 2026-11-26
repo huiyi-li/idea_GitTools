@@ -195,7 +195,8 @@ impl Git {
                 reason.chars().take(512).collect()
             },
             size: bytes.len(),
-            binary: bytes.contains(&0) || std::str::from_utf8(&bytes).is_err(),
+            binary: (!super::encoding::has_utf16_bom(&bytes) && bytes.contains(&0))
+                || super::encoding::decode_text(&bytes, None).is_err(),
         };
         fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
         super::merge::atomic_write(&directory.join(format!("{id}.snapshot")), &bytes, None)?;
@@ -226,7 +227,9 @@ impl Git {
         let content = if entry.binary {
             base64::engine::general_purpose::STANDARD.encode(bytes)
         } else {
-            String::from_utf8(bytes).map_err(|e| format!("本地历史快照不是 UTF-8。{e}"))?
+            super::encoding::decode_text(&bytes, None)
+                .map(|decoded| decoded.text)
+                .map_err(|e| format!("本地历史快照编码无法识别。{e}"))?
         };
         Ok(LocalHistorySnapshot { entry, content })
     }
@@ -238,13 +241,12 @@ impl Git {
     ) -> Result<(PathBuf, Vec<u8>, String), String> {
         let file = safe_path(self, path)?;
         let snapshot = self.local_history_read(id, path).await?;
-        let bytes = if snapshot.entry.binary {
-            base64::engine::general_purpose::STANDARD
-                .decode(snapshot.content)
-                .map_err(|e| e.to_string())?
-        } else {
-            snapshot.content.into_bytes()
-        };
+        let bytes = read_bounded(
+            &history_dir(self).await?.join(format!("{id}.snapshot")),
+            MAX_SNAPSHOT,
+        )?
+        .ok_or("本地历史快照文件不存在")?;
+        let _ = snapshot;
         read_bounded(&file, MAX_SNAPSHOT)?;
         let stamp = super::merge::stamp(&file)?;
         Ok((file, bytes, stamp))

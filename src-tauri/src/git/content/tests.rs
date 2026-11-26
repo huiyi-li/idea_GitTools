@@ -237,3 +237,52 @@ async fn lightweight_worktree_edit_preserves_crlf_records_local_history_and_reje
         git.root
     );
 }
+
+#[tokio::test]
+async fn gbk_files_support_diff_blame_local_history_and_roundtrip_save() {
+    let directory = fixture();
+    let git = Git::open(directory.path().to_str().unwrap(), None)
+        .await
+        .unwrap();
+    let file = directory.path().join("gbk_sample.txt");
+    let before_bytes = crate::git::encoding::encode_text("你好世界\n第二行\n", "GBK").unwrap();
+    fs::write(&file, &before_bytes).unwrap();
+    git.stage(vec!["gbk_sample.txt".into()], false).await.unwrap();
+    git.commit("add gbk file").await.unwrap();
+
+    let after_bytes = crate::git::encoding::encode_text("你好世界\n修改后的第二行\n", "GBK").unwrap();
+    fs::write(&file, &after_bytes).unwrap();
+
+    let diff = git.diff(request("gbk_sample.txt")).await.unwrap();
+    assert_eq!(diff.before, "你好世界\n第二行\n");
+    assert_eq!(diff.after, "你好世界\n修改后的第二行\n");
+    assert!(matches!(diff.before_encoding.as_str(), "GBK" | "GB18030"));
+    assert!(matches!(diff.after_encoding.as_str(), "GBK" | "GB18030"));
+
+    git.save_worktree_file_with_encoding(
+        "gbk_sample.txt",
+        "你好世界\n再次保存\n",
+        "你好世界\n修改后的第二行\n",
+        None,
+    )
+    .await
+    .unwrap();
+    let saved_bytes = fs::read(&file).unwrap();
+    assert_eq!(
+        saved_bytes,
+        crate::git::encoding::encode_text("你好世界\n再次保存\n", "GBK").unwrap()
+    );
+
+    let history = git.local_history_list("gbk_sample.txt").await.unwrap();
+    assert!(!history.is_empty());
+    let snap = git
+        .local_history_read(&history[0].id, "gbk_sample.txt")
+        .await
+        .unwrap();
+    assert!(!snap.entry.binary);
+    assert_eq!(snap.content, "你好世界\n再次保存\n");
+
+    let blame = git.blame("gbk_sample.txt", None, 0).await.unwrap();
+    assert_eq!(blame.lines.len(), 2);
+    assert_eq!(blame.lines[0].text, "你好世界");
+}

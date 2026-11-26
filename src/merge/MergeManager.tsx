@@ -5,6 +5,7 @@ import { MergeEditor, type MergeEditorHandle } from './MergeEditor';
 import type { MergeDocument, MergeOverview } from './protocol';
 import './manager.css';
 import { FileIcon, Icon, Split, ToolButton } from '../ui/controls';
+import { EncodingSelect } from '../ui/encoding-selector';
 
 type Confirmation = { kind: 'leave'; action: () => void } | { kind: 'abort' | 'skip' } | { kind: 'side'; side: 'left' | 'right'; id: string } | null;
 
@@ -23,6 +24,7 @@ export default function MergeManager({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [encodingOverride, setEncodingOverride] = useState('auto');
   const [remaining, setRemaining] = useState(0);
   const [completed, setCompleted] = useState<string[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
@@ -66,8 +68,14 @@ export default function MergeManager({
     return value;
   }
 
-  async function load(path: string, allowLarge = false) {
-    const value = await call<MergeDocument>('open_merge', { root, path, allowLarge });
+  async function load(path: string, allowLarge = false, encoding = 'auto') {
+    const value = await call<MergeDocument>('open_merge', {
+      root,
+      path,
+      allowLarge,
+      ...(encoding !== 'auto' ? { encoding } : {}),
+    });
+    setEncodingOverride(encoding);
     setDocument(value);
     setRemaining(Number.POSITIVE_INFINITY);
     markDirty(false);
@@ -84,7 +92,17 @@ export default function MergeManager({
     if (!document || (choice === 'result' && (!editor.current || !Number.isFinite(remaining)))) return false;
     return run(finish ? '完成并暂存' : '保存进度', async () => {
       const progress = choice === 'result' ? editor.current!.progress() : null;
-      await call('save_merge', { root, request: { id: document.id, finish, choice, progress } });
+      const writeEncoding = encodingOverride === 'auto' ? document.encoding : encodingOverride;
+      await call('save_merge', {
+        root,
+        request: {
+          id: document.id,
+          finish,
+          choice,
+          progress,
+          ...(writeEncoding ? { encoding: writeEncoding } : {}),
+        },
+      });
       markDirty(false);
       if (finish) {
         setDocument(null);
@@ -302,6 +320,17 @@ export default function MergeManager({
                   <span class="muted">
                     {dirty ? '有未保存编辑' : document.progress ? '进度已保存' : '逐块处理后完成并暂存'}
                   </span>
+                  <span class="spacer" />
+                  <EncodingSelect
+                    value={encodingOverride}
+                    detected={document.encoding}
+                    disabled={!!busy}
+                    onChange={(next) => {
+                      const reload = () => void run('切换编码', () => load(document.path, Boolean(document.large && !document.canLoad), next));
+                      if (dirtyRef.current) setConfirmation({ kind: 'leave', action: reload });
+                      else reload();
+                    }}
+                  />
                 </div>
                 {document.progressNotice && <p class="merge-progress-notice" role="status">{document.progressNotice}</p>}
                 {document.editable ? (

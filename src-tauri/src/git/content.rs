@@ -26,6 +26,7 @@ pub struct FileSnapshot {
     pub revision: Option<String>,
     pub state: SnapshotState,
     pub text: String,
+    pub encoding: String,
     pub fingerprint: String,
     pub reason: String,
     pub size: u64,
@@ -46,6 +47,7 @@ impl FileSnapshot {
             fingerprint: format!("{state:?}:{:x}", Sha256::digest(bytes)),
             state,
             text: String::new(),
+            encoding: encoding::DEFAULT_ENCODING.into(),
             reason: String::new(),
             size: bytes.len() as u64,
             large: false,
@@ -53,17 +55,29 @@ impl FileSnapshot {
         }
     }
 
+    #[cfg(test)]
     fn from_bytes(path: &str, revision: Option<&str>, bytes: &[u8], allow_large: bool) -> Self {
+        Self::from_bytes_with_encoding(path, revision, bytes, allow_large, None)
+    }
+
+    pub(super) fn from_bytes_with_encoding(
+        path: &str,
+        revision: Option<&str>,
+        bytes: &[u8],
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
+    ) -> Self {
         let mut file = Self::new(path, revision, SnapshotState::Text, bytes);
         if binary_bytes(bytes) {
             file.state = SnapshotState::Binary;
             return file;
         }
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        let Ok(decoded) = encoding::decode_text(bytes, preferred_encoding) else {
             file.state = SnapshotState::Encoding;
             return file;
         };
-        let lines = bytes.iter().filter(|&&b| b == b'\n').count() + 1;
+        file.encoding = decoded.encoding;
+        let lines = decoded.text.bytes().filter(|&b| b == b'\n').count() + 1;
         file.large = bytes.len() > MAX_FILE || lines > MAX_LINES;
         if bytes.len() > MAX_LARGE_FILE || lines > MAX_LARGE_LINES {
             file.state = SnapshotState::TooLarge;
@@ -73,13 +87,16 @@ impl FileSnapshot {
             file.can_load = true;
             file.reason = "文件超过自动加载阈值，可按需加载大文件".into();
         } else {
-            file.text = text.into();
+            file.text = decoded.text;
         }
         file
     }
 }
 
 fn binary_bytes(bytes: &[u8]) -> bool {
+    if encoding::has_utf16_bom(bytes) {
+        return false;
+    }
     bytes.contains(&0)
         || bytes.starts_with(b"MZ")
         || bytes.starts_with(b"\x7fELF")
@@ -129,6 +146,16 @@ impl Git {
         path: &str,
         allow_large: bool,
     ) -> Result<FileSnapshot, String> {
+        self.index_snapshot_with_encoding(path, allow_large, None)
+            .await
+    }
+
+    pub(super) async fn index_snapshot_with_encoding(
+        &self,
+        path: &str,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
+    ) -> Result<FileSnapshot, String> {
         let data = self
             .text(&[
                 "--literal-pathspecs",
@@ -155,12 +182,13 @@ impl Git {
                 fields[1].as_bytes(),
             ));
         }
-        self.blob_content(
+        self.blob_content_with_encoding(
             path,
             None,
             fields[1],
             self.binary_path(path, None).await?,
             allow_large,
+            preferred_encoding,
         )
         .await
     }
@@ -236,6 +264,17 @@ impl Git {
         path: &str,
         allow_large: bool,
     ) -> Result<FileSnapshot, String> {
+        self.blob_snapshot_with_encoding(revision, path, allow_large, None)
+            .await
+    }
+
+    pub(super) async fn blob_snapshot_with_encoding(
+        &self,
+        revision: Option<&str>,
+        path: &str,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
+    ) -> Result<FileSnapshot, String> {
         let Some(revision) = revision else {
             return Ok(FileSnapshot::new(path, None, SnapshotState::Missing, &[]));
         };
@@ -267,10 +306,18 @@ impl Git {
             return Err("请选择提交中的文件".into());
         }
         let binary = self.binary_path(path, Some(revision)).await?;
-        self.blob_content(path, Some(revision), fields[2], binary, allow_large)
-            .await
+        self.blob_content_with_encoding(
+            path,
+            Some(revision),
+            fields[2],
+            binary,
+            allow_large,
+            preferred_encoding,
+        )
+        .await
     }
 
+    #[allow(dead_code)]
     pub(super) async fn blob_content(
         &self,
         path: &str,
@@ -278,6 +325,19 @@ impl Git {
         hash: &str,
         binary: bool,
         allow_large: bool,
+    ) -> Result<FileSnapshot, String> {
+        self.blob_content_with_encoding(path, revision, hash, binary, allow_large, None)
+            .await
+    }
+
+    pub(super) async fn blob_content_with_encoding(
+        &self,
+        path: &str,
+        revision: Option<&str>,
+        hash: &str,
+        binary: bool,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<FileSnapshot, String> {
         let size = self
             .text(&["cat-file", "-s", hash])
@@ -308,11 +368,12 @@ impl Git {
             }
         }
         let bytes = self.bytes(&["cat-file", "blob", hash]).await?;
-        Ok(FileSnapshot::from_bytes(
+        Ok(FileSnapshot::from_bytes_with_encoding(
             path,
             revision,
             &bytes,
             allow_large,
+            preferred_encoding,
         ))
     }
 
@@ -320,6 +381,16 @@ impl Git {
         &self,
         path: &str,
         allow_large: bool,
+    ) -> Result<FileSnapshot, String> {
+        self.worktree_snapshot_with_encoding(path, allow_large, None)
+            .await
+    }
+
+    pub(super) async fn worktree_snapshot_with_encoding(
+        &self,
+        path: &str,
+        allow_large: bool,
+        preferred_encoding: Option<&str>,
     ) -> Result<FileSnapshot, String> {
         validate_path(path)?;
         let absolute = self.root.join(path);
@@ -344,11 +415,12 @@ impl Git {
         };
         if metadata.file_type().is_symlink() {
             let link = std::fs::read_link(absolute).map_err(|error| error.to_string())?;
-            return Ok(FileSnapshot::from_bytes(
+            return Ok(FileSnapshot::from_bytes_with_encoding(
                 path,
                 None,
                 link.to_string_lossy().as_bytes(),
                 allow_large,
+                preferred_encoding,
             ));
         }
         if metadata.is_dir() {
@@ -386,7 +458,13 @@ impl Git {
             .take(MAX_LARGE_FILE as u64 + 1 - bytes.len() as u64)
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
-        Ok(FileSnapshot::from_bytes(path, None, &bytes, allow_large))
+        Ok(FileSnapshot::from_bytes_with_encoding(
+            path,
+            None,
+            &bytes,
+            allow_large,
+            preferred_encoding,
+        ))
     }
 }
 

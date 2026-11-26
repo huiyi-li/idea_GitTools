@@ -10,6 +10,7 @@ import type { PreparedDiff } from './merge/analysis';
 import { syntaxTheme } from './merge/theme';
 import { buildChanges } from './shared/intellijDiff';
 import { ToolButton } from './ui/controls';
+import { EncodingSelect } from './ui/encoding-selector';
 import { useMinimapPreference } from './ui/editor-preferences';
 import { useSetting } from './state/settings';
 import { codeMinimap, minimapRanges, setMinimapRanges, type MinimapRange } from './ui/minimap';
@@ -698,16 +699,23 @@ export function DiffView({
   labels?: [string, string];
   onSaved?: () => void;
 }) {
-  const key = target
+  const baseKey = target
     ? JSON.stringify([root, target.path, target.oldPath, target.revision, target.beforeRevision, target.area])
     : '';
+  const [encodingOverride, setEncodingOverride] = useState('auto');
+  const key = baseKey ? JSON.stringify([baseKey, encodingOverride]) : '';
   const saveContext = useRef({ key });
   const draftKey = useRef('');
+  const prevBaseKey = useRef(baseKey);
+  if (prevBaseKey.current !== baseKey) {
+    prevBaseKey.current = baseKey;
+  }
   if (saveContext.current.key !== key) {
     saveContext.current = { key };
     draftKey.current = '';
   }
   const fileContext = saveContext.current;
+  useEffect(() => { setEncodingOverride('auto'); }, [baseKey]);
   useEffect(() => () => { saveContext.current = { key: '' }; }, []);
   const [loaded, setLoaded] = useState<LoadedDiff | null>(null);
   const latest = useRef(loaded);
@@ -789,7 +797,8 @@ export function DiffView({
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const file = await call<FileDiff>('read_diff', { root, request: target, allowLarge });
+          const requestPayload = encodingOverride === 'auto' ? target : { ...target, encoding: encodingOverride };
+          const file = await call<FileDiff>('read_diff', { root, request: requestPayload, allowLarge });
           if (!current) return;
           const previous = latest.current?.key === key ? latest.current : cache.current.get(key);
           if (previous && sameContents(previous.file, file)) {
@@ -854,6 +863,7 @@ export function DiffView({
         path: target.path,
         content: nextContent,
         expected: data.file.after,
+        encoding: encodingOverride === 'auto' ? (data.file.afterEncoding || undefined) : encodingOverride,
       });
       if (saveContext.current !== context) return true;
       const updatedFile: FileDiff = { ...data.file, after: nextContent };
@@ -941,6 +951,18 @@ export function DiffView({
         <span class="spacer" />
         {target && (
           <div class="diff-external-tools">
+            <EncodingSelect
+              value={encodingOverride}
+              detected={data?.file.afterEncoding || data?.file.beforeEncoding}
+              disabled={phase === '正在读取文件…'}
+              onChange={(next) => {
+                if (draftKey.current === key) {
+                  setSaveError({ key, message: '请先保存或还原当前编辑草稿，再切换编码' });
+                  return;
+                }
+                setEncodingOverride(next);
+              }}
+            />
             <button
               type="button"
               title="在外部编辑器中打开工作区文件（如已安装 VS Code 则定位到当前选中行）"

@@ -113,6 +113,8 @@ export interface BranchComparison {
 export interface FileDiff {
   before: string;
   after: string;
+  beforeEncoding?: string;
+  afterEncoding?: string;
   binary: boolean;
   tooLarge: boolean;
   canLoad?: boolean;

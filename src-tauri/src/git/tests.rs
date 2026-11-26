@@ -52,6 +52,7 @@ pub(crate) fn request(path: &str) -> DiffRequest {
         revision: None,
         before_revision: None,
         area: None,
+        encoding: None,
     }
 }
 
@@ -198,6 +199,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             revision: None,
             before_revision: None,
             area: None,
+            encoding: None,
         })
         .await
         .unwrap();
@@ -213,6 +215,7 @@ async fn rename_and_delete_diffs_include_previous_content() {
             revision: Some(hash),
             before_revision: None,
             area: None,
+            encoding: None,
         })
         .await
         .unwrap();
@@ -629,6 +632,7 @@ async fn merge_details_compare_to_first_parent() {
             revision: Some(head),
             before_revision: None,
             area: None,
+            encoding: None,
         })
         .await
         .unwrap();

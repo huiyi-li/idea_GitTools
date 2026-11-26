@@ -1522,3 +1522,21 @@ input[type='checkbox'] {
   .modal label.submodule-row { gap: 8px; padding: 8px; }
   .utility-actions .spacer { display: none; }
 }
+.encoding-selector {
+  display: inline-flex;
+  align-items: center;
+}
+.encoding-selector select {
+  height: 24px;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--border-control);
+  background: var(--bg-input);
+  color: var(--fg);
+  cursor: pointer;
+}
+.encoding-selector select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

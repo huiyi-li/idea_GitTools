@@ -13,6 +13,7 @@ export interface MergeDocument {
   left: string;
   right: string;
   working: string | null;
+  encoding?: string;
   leftTitle: string;
   rightTitle: string;
   leftStage: number;

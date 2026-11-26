@@ -276,6 +276,7 @@ async fn started_merge_and_rebase_conflicts_use_the_existing_merge_manager() {
             choice: choice.into(),
             finish: true,
             progress: None,
+            encoding: None,
         })
         .await
         .unwrap();
@@ -311,6 +312,7 @@ async fn squash_merge_stages_a_single_result_and_conflicts_resolve_through_the_m
                 choice: "right".into(),
                 finish: true,
                 progress: None,
+                encoding: None,
             })
             .await
             .unwrap();
@@ -364,6 +366,7 @@ async fn cherry_pick_and_revert_conflicts_can_abort_or_resolve_and_continue() {
             choice: "right".into(),
             finish: true,
             progress: None,
+            encoding: None,
         })
         .await
         .unwrap();
@@ -446,6 +449,7 @@ async fn comparison_is_a_read_only_snapshot_with_renames_deletions_and_binary_fi
                 revision: Some(comparison.target.clone()),
                 before_revision: Some(comparison.base.clone()),
                 area: None,
+                encoding: None,
             })
             .await
             .unwrap();

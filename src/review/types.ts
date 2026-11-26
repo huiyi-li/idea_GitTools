@@ -7,6 +7,7 @@ export interface FileSnapshot {
   revision: string | null;
   state: SnapshotState;
   text: string;
+  encoding?: string;
   fingerprint: string;
   reason?: string;
   size?: number;

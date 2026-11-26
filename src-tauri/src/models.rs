@@ -155,6 +155,8 @@ pub struct DiffRequest {
     pub before_revision: Option<String>,
     #[serde(default)]
     pub area: Option<DiffArea>,
+    #[serde(default)]
+    pub encoding: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -162,6 +164,8 @@ pub struct DiffRequest {
 pub struct FileDiff {
     pub before: String,
     pub after: String,
+    pub before_encoding: String,
+    pub after_encoding: String,
     pub binary: bool,
     pub too_large: bool,
     pub can_load: bool,

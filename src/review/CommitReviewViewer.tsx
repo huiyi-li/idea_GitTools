@@ -4,6 +4,7 @@ import { call, type Details } from '../api';
 import { MergeAnalysis } from '../merge/analysis-client';
 import { buildChanges } from '../shared/intellijDiff';
 import { FileIcon, Modal, Split, ToolButton } from '../ui/controls';
+import { EncodingSelect } from '../ui/encoding-selector';
 import { ReviewEditors } from './ReviewEditors';
 import { readable, type CommitReview, type ReviewDiffs, type WorktreeSnapshot } from './types';
 import './review.css';
@@ -53,12 +54,13 @@ export default function CommitReviewViewer({
   const [revision, setRevision] = useState(0);
   const [refreshPath, setRefreshPath] = useState<string>();
   const [allowLarge, setAllowLarge] = useState(false);
+  const [encodingOverride, setEncodingOverride] = useState('auto');
   const latest = useRef(loaded);
   latest.current = loaded;
   const cache = useRef(new Map<string, Loaded>());
   const latestVersion = useRef(version);
   latestVersion.current = version;
-  const key = JSON.stringify([root, details.commit.hash, path, allowLarge]);
+  const key = JSON.stringify([root, details.commit.hash, path, allowLarge, encodingOverride]);
   const index = details.changes.findIndex((change) => change.path === path);
   const value = loaded?.key === key ? loaded : undefined;
 
@@ -76,6 +78,7 @@ export default function CommitReviewViewer({
         try {
           const readVersion = latestVersion.current;
           const cached = latest.current?.key === key ? latest.current : cache.current.get(key);
+          const encodingArg = encodingOverride === 'auto' ? undefined : encodingOverride;
           const document = cached
             ? {
                 ...cached.document,
@@ -83,6 +86,7 @@ export default function CommitReviewViewer({
                   root,
                   path: refreshPath ?? cached.document.current.file.path,
                   allowLarge,
+                  ...(encodingArg ? { encoding: encodingArg } : {}),
                 }),
               }
             : await call<CommitReview>('read_commit_review', {
@@ -90,6 +94,7 @@ export default function CommitReviewViewer({
                 revision: details.commit.hash,
                 path,
                 allowLarge,
+                ...(encodingArg ? { encoding: encodingArg } : {}),
               });
           if (!active) return;
           const commit =
@@ -138,6 +143,7 @@ export default function CommitReviewViewer({
   function selectFile(next: string) {
     if (next === path) return;
     setAllowLarge(false);
+    setEncodingOverride('auto');
     setRefreshPath(undefined);
     setPath(next);
   }
@@ -152,6 +158,7 @@ export default function CommitReviewViewer({
         path: currentFile.path,
         content,
         expected: currentFile.text,
+        encoding: encodingOverride === 'auto' ? (currentFile.encoding || undefined) : encodingOverride,
       });
       const updatedFile = {
         ...currentFile,
@@ -242,6 +249,12 @@ export default function CommitReviewViewer({
           label="下一个变更文件"
           disabled={index < 0 || index >= details.changes.length - 1}
           onClick={() => selectFile(details.changes[index + 1].path)}
+        />
+        <EncodingSelect
+          value={encodingOverride}
+          detected={value?.document.current.file.encoding || value?.document.after.encoding || value?.document.before.encoding}
+          disabled={busy}
+          onChange={setEncodingOverride}
         />
         <button disabled={busy || !value} onClick={refreshCurrent}>
           刷新当前内容

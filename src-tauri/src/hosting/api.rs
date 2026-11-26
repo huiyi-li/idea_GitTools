@@ -743,6 +743,8 @@ impl Api {
             } else {
                 String::from_utf8(after).map_err(|_| "文件编码无效")?
             },
+            before_encoding: "UTF-8".into(),
+            after_encoding: "UTF-8".into(),
             binary,
             too_large,
             can_load: false,
