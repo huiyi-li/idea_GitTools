@@ -16,19 +16,29 @@ export function iconUrl(name: string, dark: boolean) {
   return icons[`./icons/${file}${dark ? '_dark' : ''}.svg`] as string;
 }
 
-const messages: Record<string, string> = {
-  Accept: '接受',
-  Append: '追加',
-  Ignore: '忽略',
-  'Resolve Automatically': '自动解决',
-  'Accept Left Side': '接受左侧',
-  'Accept Right Side': '接受右侧',
-  'Resolve using Left': '用左侧解决',
-  'Resolve using Right': '用右侧解决',
+import { t as i18nT, type I18nKey } from '../i18n';
+
+const LEGACY_KEYS: Record<string, I18nKey> = {
+  Accept: 'merge.accept',
+  Append: 'merge.append',
+  Ignore: 'merge.ignore',
+  Resolve: 'merge.resolve',
+  'Resolve Automatically': 'merge.resolveAutomatically',
+  'Accept Left Side': 'merge.acceptLeftSide',
+  'Accept Right Side': 'merge.acceptRightSide',
+  'Resolve using Left': 'merge.resolveUsingLeft',
+  'Resolve using Right': 'merge.resolveUsingRight',
+  'Compare with Clipboard': 'merge.compareWithClipboard',
+  'Collapse Unchanged Fragments': 'merge.collapseUnchanged',
+  'Synchronize Scrolling': 'merge.syncScrolling',
+  'Click to expand': 'merge.clickToExpand',
+  '{0}\nCtrl+click to resolve conflict': 'merge.ctrlClickToResolve',
 };
 
 export function t(message: string, ...args: (string | number | boolean)[]) {
-  return (messages[message] ?? message).replace(/\{(\d+)\}/g, (value, index) =>
+  const mapped = LEGACY_KEYS[message];
+  const resolved = mapped ? i18nT(mapped) : message;
+  return resolved.replace(/\{(\d+)\}/g, (value, index) =>
     index < args.length ? String(args[index]) : value,
   );
 }

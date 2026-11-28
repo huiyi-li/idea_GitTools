@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useI18n } from './i18n';
 import { Icon, Modal } from './ui/controls';
 import { Kbd } from './ui/primitives';
 import './command-palette.css';
@@ -21,6 +22,7 @@ export function CommandPalette({
   commands: PaletteCommand[];
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -50,7 +52,7 @@ export function CommandPalette({
         <input
           autoFocus
           aria-label="搜索命令、工具或分支"
-          placeholder="输入命令、Git 工具、分支或仓库名…"
+          placeholder={t('palette.placeholder')}
           value={query}
           onInput={(event) => setQuery(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -91,7 +93,7 @@ export function CommandPalette({
             </span>
           </button>
         ))}
-        {!filtered.length && <div class="command-palette-empty">未找到匹配的命令或分支</div>}
+        {!filtered.length && <div class="command-palette-empty">{t('palette.empty')}</div>}
       </div>
     </Modal>
   );

@@ -1,8 +1,10 @@
 import { type Diagnostics } from './api';
+import { useI18n } from './i18n';
 import { Modal, ToolButton } from './ui/controls';
 import { useRepositoryRead } from './ui/useRepositoryRead';
 
 export function DiagnosticsDialog({ root, onClose }: { root: string; onClose: () => void }) {
+  const { t } = useI18n();
   const { data: diagnostics, loading, error, reload } = useRepositoryRead<Diagnostics>('git_diagnostics', root);
   return (
     <Modal title="Git 诊断" onClose={onClose} class="utility-dialog diagnostics-dialog">
@@ -29,7 +31,7 @@ export function DiagnosticsDialog({ root, onClose }: { root: string; onClose: ()
       </dl>}
       <footer class="modal-actions utility-actions">
         <button aria-label="重新读取 Git 诊断" disabled={loading} onClick={() => void reload()}>重新读取</button><span class="spacer" />
-        <button type="button" onClick={onClose}>关闭</button>
+        <button type="button" onClick={onClose}>{t('common.close')}</button>
       </footer>
     </Modal>
   );

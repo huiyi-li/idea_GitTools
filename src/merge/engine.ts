@@ -11,7 +11,7 @@ import {
 } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, GutterMarker, WidgetType } from '@codemirror/view';
 import { ChangeState, LineEdit, MergeChange, MergeModel } from '../shared/mergeModel';
-import { t } from './ui';
+import { t } from '../i18n';
 
 // ---------------------------------------------------------------- model state in the result editor
 
@@ -354,7 +354,7 @@ class FoldWidget extends WidgetType {
     const el = document.createElement('div');
     el.className = 'mg-fold';
     el.dataset.group = String(this.group);
-    el.dataset.tip = t('Click to expand');
+    el.dataset.tip = t('merge.clickToExpand');
     el.title = el.dataset.tip;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', el.dataset.tip);

@@ -7,6 +7,7 @@ import {
   type UpdateAutoClean,
   type UpdateStrategy,
 } from './state/settings';
+import { LOCALE_OPTIONS, useI18n, type LocaleType } from './i18n';
 import { Icon, Modal, ToolButton } from './ui/controls';
 import { Kbd, SegmentedControl, SettingsRow, Switch } from './ui/primitives';
 import './settings.css';
@@ -43,6 +44,8 @@ export function SettingsModal({
   const [query, setQuery] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
 
+  const { t } = useI18n();
+  const [locale, setLocaleSetting] = useSetting('locale');
   const [theme, setTheme] = useSetting('theme');
   const [density, setDensity] = useSetting('density');
   const [editorFontSize, setEditorFontSize] = useSetting('editorFontSize');
@@ -138,9 +141,22 @@ export function SettingsModal({
 
         <main class="settings-content" aria-label="设置项列表">
           {showSection('appearance') &&
-            matches('外观', '主题', '深色', '浅色', '系统', '密度', '紧凑', '字体', '字号', '行高', 'theme', 'font') && (
+            matches('外观', '语言', 'language', 'locale', '主题', '深色', '浅色', '系统', '密度', '紧凑', '字体', '字号', '行高', 'theme', 'font') && (
               <section class="settings-section">
-                <h3 class="settings-section-heading">外观与排版</h3>
+                <h3 class="settings-section-heading">{t('settings.section.appearance')}</h3>
+                {matches('语言', '界面语言', 'language', 'locale', 'english', '中文', '繁體') && (
+                  <SettingsRow
+                    title={t('settings.language.title')}
+                    description={t('settings.language.desc')}
+                  >
+                    <SegmentedControl<LocaleType>
+                      label={t('settings.language.title')}
+                      value={locale}
+                      options={LOCALE_OPTIONS}
+                      onChange={setLocaleSetting}
+                    />
+                  </SettingsRow>
+                )}
                 {matches('主题', '深色', '浅色', '系统', 'theme') && (
                   <SettingsRow
                     title="界面主题"

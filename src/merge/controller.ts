@@ -27,7 +27,8 @@ import {
 } from '../shared/mergeModel';
 import { MergeInit, MergeSettings } from '../shared/mergeProtocol';
 import { innerDifferences } from '../shared/mergeResolve';
-import { iconUrl, t, type MenuEntry } from './ui';
+import { iconUrl, type MenuEntry } from './ui';
+import { t } from '../i18n';
 import {
   buildDecorations,
   buildFolds,
@@ -518,7 +519,7 @@ export class MergeController {
     if (pane === 'left' || pane === 'result') {
       if (has(sideOpen('left')))
         items.push({
-          label: pane === 'result' ? t('Accept Left Side') : t('Accept'),
+          label: pane === 'result' ? t('merge.acceptLeftSide') : t('merge.accept'),
           icon: 'diff/arrowRight@14x14',
           shortcut: 'Ctrl+Alt+R',
           action: () => this.applySelected(pane, 'left', false),
@@ -527,56 +528,56 @@ export class MergeController {
     if (pane === 'right' || pane === 'result') {
       if (has(sideOpen('right')))
         items.push({
-          label: pane === 'result' ? t('Accept Right Side') : t('Accept'),
+          label: pane === 'result' ? t('merge.acceptRightSide') : t('merge.accept'),
           icon: 'diff/arrow@14x14',
           shortcut: 'Ctrl+Alt+A',
           action: () => this.applySelected(pane, 'right', false),
         });
     }
     if ((pane === 'left' || pane === 'result') && has(sideOpen('left')))
-      items.push({ label: t('Resolve using Left'), action: () => this.applySelected(pane, 'left', true) });
+      items.push({ label: t('merge.resolveUsingLeft'), action: () => this.applySelected(pane, 'left', true) });
     if ((pane === 'right' || pane === 'result') && has(sideOpen('right')))
-      items.push({ label: t('Resolve using Right'), action: () => this.applySelected(pane, 'right', true) });
+      items.push({ label: t('merge.resolveUsingRight'), action: () => this.applySelected(pane, 'right', true) });
     if (pane === 'left' && has(sideOpen('left')))
       items.push({
-        label: t('Ignore'),
+        label: t('merge.ignore'),
         icon: 'diff/remove@14x14',
         action: () => this.ignoreSelectedSide(pane, 'left'),
       });
     if (pane === 'right' && has(sideOpen('right')))
       items.push({
-        label: t('Ignore'),
+        label: t('merge.ignore'),
         icon: 'diff/remove@14x14',
         action: () => this.ignoreSelectedSide(pane, 'right'),
       });
     if (pane === 'result') {
       if (has((c) => model.canResolveAutomatically(c.index, 'base')))
         items.push({
-          label: t('Resolve Automatically'),
+          label: t('merge.resolveAutomatically'),
           icon: 'diff/magicResolve@14x14',
           action: () => this.resolveSelected(),
         });
       if (has((_c, s) => !isResolved(s)))
-        items.push({ label: t('Ignore'), icon: 'diff/remove@14x14', action: () => this.ignoreSelected() });
+        items.push({ label: t('merge.ignore'), icon: 'diff/remove@14x14', action: () => this.ignoreSelected() });
     }
     items.push({ separator: true });
     if (pane === 'result') items.push(toggles.clipboard.cut, toggles.clipboard.copy, toggles.clipboard.paste);
     else items.push(toggles.clipboard.copy);
     items.push({ separator: true });
     items.push({
-      label: t('Compare with Clipboard'),
+      label: t('merge.compareWithClipboard'),
       icon: 'actions/diffWithClipboard',
       action: toggles.compareClipboard,
     });
     items.push({ separator: true });
     if (this.init.contextLines !== -1)
       items.push({
-        label: t('Collapse Unchanged Fragments'),
+        label: t('merge.collapseUnchanged'),
         checked: this.settings.collapseUnchanged,
         action: toggles.toggleCollapse,
       });
     items.push({
-      label: t('Synchronize Scrolling'),
+      label: t('merge.syncScrolling'),
       checked: this.settings.syncScroll,
       action: toggles.toggleSync,
     });
@@ -735,7 +736,7 @@ export class MergeController {
         });
         if (!sideResolved) {
           const tip = (text: string) =>
-            c.kind === 'conflict' ? t('{0}\nCtrl+click to resolve conflict', text) : text;
+            c.kind === 'conflict' ? t('merge.ctrlClickToResolve', { 0: text }) : text;
           const apply: Operation = {
             i: c.index,
             action: 'apply',
@@ -748,14 +749,14 @@ export class MergeController {
                 : st.oneside
                   ? ICONS.appendRight
                   : ICONS.applyRight,
-            tooltip: tip(t('Accept')),
+            tooltip: tip(t('merge.accept')),
           };
           const ignore: Operation = {
             i: c.index,
             action: 'ignore',
             side,
             icon: ICONS.ignore,
-            tooltip: tip(t('Ignore')),
+            tooltip: tip(t('merge.ignore')),
           };
           ops[side].push({ line: c[side][0], ops: [apply, ignore] });
         }
@@ -764,7 +765,7 @@ export class MergeController {
         ops.result.push({
           line: st.start,
           ops: [
-            { i: c.index, action: 'resolve', side: 'result', icon: ICONS.resolve, tooltip: t('Resolve') },
+            { i: c.index, action: 'resolve', side: 'result', icon: ICONS.resolve, tooltip: t('merge.resolve') },
           ],
         });
       }

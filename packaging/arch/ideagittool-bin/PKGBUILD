@@ -1,7 +1,7 @@
 # Maintainer: IdeaGitTool contributors
 pkgname=ideagittool-bin
 _pkgname=ideagittool
-pkgver=0.4.9
+pkgver=0.4.10
 pkgrel=1
 pkgdesc="Lightweight standalone IdeaGitTool Git client (prebuilt)"
 arch=('x86_64')
@@ -16,7 +16,7 @@ depends=(
   'libsecret'
 )
 options=('!strip')
-source=("IdeaGitTool_${pkgver}_linux-x86_64.tar.gz::${url}/releases/download/v${pkgver}/IdeaGitTool_${pkgver}_linux-x86_64.tar.gz")
+source=("IdeaGitTool_${pkgver}_linux-x86_64.tar.gz::${url}/releases/download/${pkgver}/IdeaGitTool_${pkgver}_linux-x86_64.tar.gz")
 sha256sums=('SKIP')
 
 package() {

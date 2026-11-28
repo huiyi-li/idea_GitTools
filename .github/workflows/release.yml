@@ -104,6 +104,25 @@ jobs:
         run: |
           bash -n packaging/arch/ideagittool/PKGBUILD
           bash -n packaging/arch/ideagittool-bin/PKGBUILD
+      - name: Build Arch .pkg.tar.zst & pacman repo (.db.tar.gz + .db)
+        run: |
+          tar_file=$(ls release/IdeaGitTool_*_linux-x86_64.tar.gz)
+          mkdir -p release-arch
+          docker run --rm -v "$PWD:/work" -w /work archlinux:latest bash -c "
+            set -euo pipefail
+            pacman -Syu --noconfirm --needed base-devel >/dev/null
+            useradd -m builder
+            mkdir -p /tmp/archbuild /work/release-arch
+            cp /work/packaging/arch/ideagittool-bin/PKGBUILD /tmp/archbuild/
+            cp /work/$tar_file /tmp/archbuild/
+            chown -R builder:builder /tmp/archbuild
+            su - builder -c 'cd /tmp/archbuild && makepkg -f --skipinteg'
+            cp /tmp/archbuild/*.pkg.tar.zst /work/release-arch/
+            repo-add /work/release-arch/ideagittool.db.tar.gz /work/release-arch/*.pkg.tar.zst
+            rm -f /work/release-arch/ideagittool.db /work/release-arch/ideagittool.files
+            cp -L /work/release-arch/ideagittool.db.tar.gz /work/release-arch/ideagittool.db
+            cp -L /work/release-arch/ideagittool.files.tar.gz /work/release-arch/ideagittool.files
+          "
       - name: Collect & verify Linux release artifacts
         run: |
           mkdir -p release-linux
@@ -112,14 +131,19 @@ jobs:
           cp src-tauri/target/release/bundle/appimage/*.AppImage release-linux/
           cp src-tauri/target/release/bundle/appimage/*.AppImage.sig release-linux/ || true
           cp release/IdeaGitTool_*_linux-x86_64.tar.gz* release-linux/
+          cp release-arch/* release-linux/
           deb_file=$(ls release-linux/*.deb)
           rpm_file=$(ls release-linux/*.rpm)
           appimage_file=$(ls release-linux/*.AppImage)
           tar_file=$(ls release-linux/*.tar.gz)
+          pkg_file=$(ls release-linux/*.pkg.tar.zst)
           dpkg-deb -I "$deb_file"
           rpm -qlp "$rpm_file" | grep ideagittool-desktop
           test -x "$appimage_file"
           test -s "${appimage_file}.sig"
+          test -s "$pkg_file"
+          test -s release-linux/ideagittool.db.tar.gz
+          test -s release-linux/ideagittool.db
           (cd release-linux && sha256sum -c "$(basename "$tar_file").sha256")
       - name: Upload Linux release artifacts
         uses: actions/upload-artifact@v4
@@ -170,10 +194,11 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           notes_file="docs/RELEASE_${version}.md"
+          mapfile -t assets < <(find artifacts -type f | sort)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" artifacts/release-windows/* artifacts/release-linux/* --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" artifacts/release-windows/* artifacts/release-linux/* \
+            gh release create "$TAG" "${assets[@]}" \
               --title "release $version" \
               --notes-file "$notes_file"
           fi
@@ -202,6 +227,10 @@ jobs:
               f"IdeaGitTool_{version}_windows-x64.zip",
               f"IdeaGitTool_{version}_linux-x86_64.tar.gz",
               f"IdeaGitTool_{version}_linux-x86_64.tar.gz.sha256",
+              "ideagittool.db.tar.gz",
+              "ideagittool.db",
+              "ideagittool.files.tar.gz",
+              "ideagittool.files",
               "latest.json",
               "release-manifest.json",
           ]:
@@ -210,5 +239,6 @@ jobs:
           assert any(n.endswith(".rpm") for n in names), "Missing .rpm asset"
           assert any(n.endswith(".AppImage") for n in names), "Missing .AppImage asset"
           assert any(n.endswith(".AppImage.sig") for n in names), "Missing .AppImage.sig asset"
+          assert any(n.endswith(".pkg.tar.zst") for n in names), "Missing .pkg.tar.zst asset"
           print("PASS all published multi-platform assets verified!")
           PY

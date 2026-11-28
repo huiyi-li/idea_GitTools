@@ -1,17 +1,18 @@
 {
   "name": "ideagittool-desktop",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "tsc --noEmit && vite build",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "build": "node scripts/check-i18n.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "desktop": "tauri dev",
     "package": "node scripts/package.mjs",
     "postpackage": "node scripts/collect-release.mjs",
-    "test": "npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:native",
+    "test": "node scripts/check-i18n.mjs && npm run test:merge && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:native",
     "test:native": "node scripts/test-native.mjs",
     "test:merge": "node scripts/test-merge.mjs"
   },

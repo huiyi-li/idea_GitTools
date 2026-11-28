@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { setMinimapEnabled } from '../ui/editor-preferences';
+import { normalizeLocale, setLocale as applyI18nLocale, type LocaleType } from '../i18n';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type DensityMode = 'comfortable' | 'compact';
@@ -7,6 +8,7 @@ export type UpdateStrategy = 'ff-only' | 'rebase' | 'merge';
 export type UpdateAutoClean = 'shelf' | 'stash' | 'none';
 
 export interface AppSettings {
+  locale: LocaleType;
   theme: ThemeMode;
   density: DensityMode;
   editorFontSize: number;
@@ -30,6 +32,7 @@ export interface AppSettings {
 export type SettingKey = keyof AppSettings;
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  locale: 'zh-CN',
   theme: 'dark',
   density: 'comfortable',
   editorFontSize: 12,
@@ -51,6 +54,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const STORAGE_KEYS: Record<SettingKey, string> = {
+  locale: 'ui.locale',
   theme: 'theme',
   density: 'ui.density',
   editorFontSize: 'editor.fontSize',
@@ -81,6 +85,8 @@ function parseStored<K extends SettingKey>(key: K, raw: string | null): AppSetti
   try {
     const parsed = JSON.parse(raw);
     switch (key) {
+      case 'locale':
+        return normalizeLocale(parsed) as AppSettings[K];
       case 'theme':
         return (parsed === 'dark' || parsed === 'light' || parsed === 'system'
           ? parsed
@@ -140,6 +146,7 @@ export function getSetting<K extends SettingKey>(key: K): AppSettings[K] {
 
 export function getAllSettings(): AppSettings {
   return {
+    locale: getSetting('locale'),
     theme: getSetting('theme'),
     density: getSetting('density'),
     editorFontSize: getSetting('editorFontSize'),
@@ -162,7 +169,9 @@ export function getAllSettings(): AppSettings {
 }
 
 export function setSetting<K extends SettingKey>(key: K, value: AppSettings[K]): void {
-  if (key === 'minimap') {
+  if (key === 'locale') {
+    applyI18nLocale(value as LocaleType);
+  } else if (key === 'minimap') {
     setMinimapEnabled(Boolean(value));
   } else {
     try {
