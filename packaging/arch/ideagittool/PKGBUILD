@@ -1,0 +1,45 @@
+# Maintainer: IdeaGitTool contributors
+pkgname=ideagittool
+pkgver=0.4.9
+pkgrel=1
+pkgdesc="Lightweight standalone IdeaGitTool Git client"
+arch=('x86_64')
+url="https://github.com/huiyi-li/idea_GitTools"
+license=('Apache-2.0')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'git'
+  'libsecret'
+)
+makedepends=(
+  'nodejs'
+  'npm'
+  'rust'
+  'cargo'
+)
+options=('!lto')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "${srcdir}/idea_GitTools-${pkgver}"
+  npm ci
+  cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+}
+
+build() {
+  cd "${srcdir}/idea_GitTools-${pkgver}"
+  npm run build
+  cargo build --locked --release --manifest-path src-tauri/Cargo.toml
+}
+
+package() {
+  cd "${srcdir}/idea_GitTools-${pkgver}"
+  install -Dm755 "src-tauri/target/release/ideagittool-desktop" "${pkgdir}/usr/bin/ideagittool-desktop"
+  install -Dm644 "packaging/linux/ideagittool.desktop" "${pkgdir}/usr/share/applications/${pkgname}.desktop"
+  install -Dm644 "src-tauri/icons/128x128.png" "${pkgdir}/usr/share/icons/hicolor/128x128/apps/${pkgname}.png"
+  install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "NOTICE" "${pkgdir}/usr/share/licenses/${pkgname}/NOTICE"
+  install -Dm644 "licenses/UPSTREAM_LICENSE.txt" "${pkgdir}/usr/share/licenses/${pkgname}/UPSTREAM_LICENSE.txt"
+}

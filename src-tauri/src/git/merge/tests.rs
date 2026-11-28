@@ -503,6 +503,13 @@ async fn side_selection_resolves_delete_and_binary_conflicts() {
         dir.path(),
         &["update-index", "--chmod=+x", "--", "binary.bin"],
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(dir.path().join("binary.bin")).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(dir.path().join("binary.bin"), perms).unwrap();
+    }
     git.commit("binary feature").await.unwrap();
     git.checkout("refs/heads/main").await.unwrap();
     fs::write(dir.path().join("binary.bin"), [0, 5, 6]).unwrap();

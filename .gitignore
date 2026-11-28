@@ -16,6 +16,7 @@
 !/src-tauri/
 !/scripts/
 !/test/
+!/packaging/
 
 # Keep only the Rust project inputs under src-tauri.
 /src-tauri/*
@@ -23,6 +24,7 @@
 !/src-tauri/Cargo.lock
 !/src-tauri/build.rs
 !/src-tauri/tauri.conf.json
+!/src-tauri/tauri.linux.conf.json
 !/src-tauri/capabilities/
 !/src-tauri/icons/
 !/src-tauri/src/

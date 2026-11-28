@@ -1,4 +1,4 @@
-name: Signed Windows release
+name: Multi-Platform Signed Release
 
 on:
   push:
@@ -17,8 +17,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -54,14 +54,161 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify signed release and reject tampered installer
         run: cargo test --manifest-path src-tauri/Cargo.toml signed_release_matches_embedded_key_and_rejects_tampering -- --ignored
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v7
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: IdeaGitTool-${{ github.ref_name }}-windows-x64
+          name: release-windows
           path: release/*
           if-no-files-found: error
-      - name: Publish verified release
-        run: node scripts/publish-release.mjs
+
+  linux:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || secrets.IDEA_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Linux Tauri & packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            dpkg \
+            rpm \
+            squashfs-tools \
+            desktop-file-utils \
+            file
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm test
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Build Linux deb, rpm, AppImage & updater sig
+        run: npx tauri build
+      - name: Package portable Linux tar.gz
+        run: python3 scripts/package_linux_tarball.py "${{ github.ref_name }}"
+      - name: Validate Arch PKGBUILD syntax
+        run: |
+          bash -n packaging/arch/ideagittool/PKGBUILD
+          bash -n packaging/arch/ideagittool-bin/PKGBUILD
+      - name: Collect & verify Linux release artifacts
+        run: |
+          mkdir -p release-linux
+          cp src-tauri/target/release/bundle/deb/*.deb release-linux/
+          cp src-tauri/target/release/bundle/rpm/*.rpm release-linux/
+          cp src-tauri/target/release/bundle/appimage/*.AppImage release-linux/
+          cp src-tauri/target/release/bundle/appimage/*.AppImage.sig release-linux/ || true
+          cp release/IdeaGitTool_*_linux-x86_64.tar.gz* release-linux/
+          deb_file=$(ls release-linux/*.deb)
+          rpm_file=$(ls release-linux/*.rpm)
+          appimage_file=$(ls release-linux/*.AppImage)
+          tar_file=$(ls release-linux/*.tar.gz)
+          dpkg-deb -I "$deb_file"
+          rpm -qlp "$rpm_file" | grep ideagittool-desktop
+          test -x "$appimage_file"
+          test -s "${appimage_file}.sig"
+          (cd release-linux && sha256sum -c "$(basename "$tar_file").sha256")
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release-linux/*
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Merge Linux AppImage updater entry into latest.json
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+          win_dir = Path("artifacts/release-windows")
+          lin_dir = Path("artifacts/release-linux")
+
+          latest_path = win_dir / "latest.json"
+          latest = json.loads(latest_path.read_text(encoding="utf-8"))
+          sigs = list(lin_dir.glob("*.AppImage.sig"))
+          if sigs:
+              sig_file = sigs[0]
+              appimage_name = sig_file.name[:-4]
+              latest.setdefault("platforms", {})["linux-x86_64"] = {
+                  "signature": sig_file.read_text(encoding="utf-8").strip(),
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{appimage_name}",
+              }
+              latest_path.write_text(json.dumps(latest, indent=2) + "\n", encoding="utf-8")
+              print(f"Added linux-x86_64 updater entry for {appimage_name}")
+          PY
+      - name: Publish multi-platform release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          notes_file="docs/RELEASE_${version}.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/release-windows/* artifacts/release-linux/* --clobber
+          else
+            gh release create "$TAG" artifacts/release-windows/* artifacts/release-linux/* \
+              --title "release $version" \
+              --notes-file "$notes_file"
+          fi
+
+      - name: Verify published multi-platform assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          tag = os.environ["TAG"]
+          version = json.load(open("package.json", encoding="utf-8"))["version"]
+          out = subprocess.check_output(
+              ["gh", "release", "view", tag, "--json", "assets,isDraft"],
+              text=True,
+          )
+          data = json.loads(out)
+          assert not data["isDraft"], "Release should not remain draft"
+          names = [a["name"] for a in data["assets"]]
+          print("Published assets:", names)
+          for required in [
+              "IdeaGitTool.exe",
+              "IdeaGitTool-setup.exe",
+              "IdeaGitTool-setup.exe.sig",
+              f"IdeaGitTool_{version}_windows-x64.zip",
+              f"IdeaGitTool_{version}_linux-x86_64.tar.gz",
+              f"IdeaGitTool_{version}_linux-x86_64.tar.gz.sha256",
+              "latest.json",
+              "release-manifest.json",
+          ]:
+              assert required in names, f"Missing asset: {required}"
+          assert any(n.endswith(".deb") for n in names), "Missing .deb asset"
+          assert any(n.endswith(".rpm") for n in names), "Missing .rpm asset"
+          assert any(n.endswith(".AppImage") for n in names), "Missing .AppImage asset"
+          assert any(n.endswith(".AppImage.sig") for n in names), "Missing .AppImage.sig asset"
+          print("PASS all published multi-platform assets verified!")
+          PY

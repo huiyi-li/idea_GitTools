@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=IdeaGitTool
+Comment=Lightweight standalone IdeaGitTool Git client
+Exec=ideagittool-desktop %U
+Icon=ideagittool
+Terminal=false
+Type=Application
+Categories=Development;RevisionControl;
+Keywords=git;vcs;diff;merge;rebase;
+StartupWMClass=ideagittool-desktop

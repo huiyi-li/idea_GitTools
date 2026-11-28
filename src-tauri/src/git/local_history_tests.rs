@@ -128,7 +128,11 @@ async fn local_history_works_in_linked_worktrees_and_restores_missing_binary_fil
 async fn local_history_refuses_metadata_paths_and_links_outside_the_repository() {
     let dir = fixture();
     let git = Git::open(dir.path().to_str().unwrap(), None).await.unwrap();
-    for path in ["", ".git/config", "../outside", "C:/outside"] {
+    let mut invalid_paths = vec!["", ".git/config", "../outside", "/outside"];
+    if cfg!(windows) {
+        invalid_paths.push("C:/outside");
+    }
+    for path in invalid_paths {
         assert!(
             git.local_history_capture(path, "unsafe").await.is_err(),
             "{path}"
