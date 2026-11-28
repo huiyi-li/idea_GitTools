@@ -1,6 +1,6 @@
 # Maintainer: IdeaGitTool contributors
 pkgname=ideagittool
-pkgver=0.4.10
+pkgver=0.4.11
 pkgrel=1
 pkgdesc="Lightweight standalone IdeaGitTool Git client"
 arch=('x86_64')

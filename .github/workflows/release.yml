@@ -116,7 +116,7 @@ jobs:
             cp /work/packaging/arch/ideagittool-bin/PKGBUILD /tmp/archbuild/
             cp /work/$tar_file /tmp/archbuild/
             chown -R builder:builder /tmp/archbuild
-            su - builder -c 'cd /tmp/archbuild && makepkg -f --skipinteg'
+            su - builder -c 'cd /tmp/archbuild && makepkg -f -d --skipinteg'
             cp /tmp/archbuild/*.pkg.tar.zst /work/release-arch/
             repo-add /work/release-arch/ideagittool.db.tar.gz /work/release-arch/*.pkg.tar.zst
             rm -f /work/release-arch/ideagittool.db /work/release-arch/ideagittool.files

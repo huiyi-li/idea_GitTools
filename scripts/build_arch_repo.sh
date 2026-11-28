@@ -29,7 +29,7 @@ fi
 
 (
   cd "${WORK_DIR}"
-  makepkg -f --skipinteg
+  makepkg -f -d --skipinteg
 )
 
 cp -f "${WORK_DIR}"/*.pkg.tar.zst "${OUT_DIR}/"
