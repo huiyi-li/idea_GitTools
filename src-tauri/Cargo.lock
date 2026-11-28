@@ -1890,7 +1890,7 @@ dependencies = [
 
 [[package]]
 name = "ideagittool-desktop"
-version = "0.4.11"
+version = "0.4.12"
 dependencies = [
  "base64 0.22.1",
  "chardetng",

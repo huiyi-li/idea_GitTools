@@ -135,7 +135,7 @@ jobs:
           deb_file=$(ls release-linux/*.deb)
           rpm_file=$(ls release-linux/*.rpm)
           appimage_file=$(ls release-linux/*.AppImage)
-          tar_file=$(ls release-linux/*.tar.gz)
+          tar_file=$(ls release-linux/IdeaGitTool_*_linux-x86_64.tar.gz)
           pkg_file=$(ls release-linux/*.pkg.tar.zst)
           dpkg-deb -I "$deb_file"
           rpm -qlp "$rpm_file" | grep ideagittool-desktop
